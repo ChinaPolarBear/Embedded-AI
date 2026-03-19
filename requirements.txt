@@ -1,0 +1,10 @@
+# requirements.txt
+
+numpy
+matplotlib
+torch
+brevitas
+qonnx
+onnx
+onnxoptimizer
+onnxruntime
