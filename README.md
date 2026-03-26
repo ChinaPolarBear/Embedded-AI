@@ -276,25 +276,7 @@ cp deeponet_u250_int8_qonnx_finn.onnx /path/to/my_build/model.onnx
 
 #### Minimal terminal workflow
 
-Inside the FINN Linux / Docker environment, a practical workflow is:
-
-```bash
-cd /home/oband/finn/my_build
-ls
-```
-
-At minimum, make sure this directory contains:
-
-- `model.onnx`
-- `dataflow_build_config.json`
-
-If `build_dataflow` is not available as a shell command, run the Python entry point directly:
-
-```bash
-python /home/oband/finn/src/finn/builder/build_dataflow.py .
-```
-
-If you are launching from the FINN repository root instead, you can also use:
+Inside the FINN environment, the practical workflow used in this project is:
 
 ```bash
 cd /home/oband/finn
@@ -310,29 +292,23 @@ cd /home/oband/finn/my_build
 nano dataflow_build_config.json
 ```
 
-After editing, verify the contents:
+Paste the JSON content into `nano`, then save and exit:
+
+- press `Ctrl+O` to write the file
+- press `Enter` to confirm the filename
+- press `Ctrl+X` to exit
+
+After saving, you can verify the contents:
 
 ```bash
 cat dataflow_build_config.json
 ```
 
-If you prefer to overwrite the file directly from terminal, use:
+Then run the build from the FINN root directory:
 
 ```bash
-cat > /home/oband/finn/my_build/dataflow_build_config.json <<'EOF'
-{
-  "output_dir": "output_u250_hw",
-  "synth_clk_period_ns": 5.0,
-  "fpga_part": "xcu250-figd2104-2L-e",
-  "generate_outputs": [
-    "estimate_reports",
-    "stitched_ip",
-    "rtlsim_performance",
-    "out_of_context_synth"
-  ],
-  "save_intermediate_models": true
-}
-EOF
+cd /home/oband/finn
+./run-docker.sh build_dataflow /home/oband/finn/my_build
 ```
 
 #### Recommended first pass: estimate-only build
@@ -352,8 +328,8 @@ Start with a light build before trying a full bitfile flow:
 Then run inside the FINN environment:
 
 ```bash
-cd /home/oband/finn/my_build
-python /home/oband/finn/src/finn/builder/build_dataflow.py .
+cd /home/oband/finn
+./run-docker.sh build_dataflow /home/oband/finn/my_build
 ```
 
 This is the safest first checkpoint because it verifies whether FINN can:
@@ -388,8 +364,8 @@ For this project and FINN setup, using `"fpga_part": "xcu250-figd2104-2L-e"` is 
 Run the second pass with:
 
 ```bash
-cd /home/oband/finn/my_build
-python /home/oband/finn/src/finn/builder/build_dataflow.py .
+cd /home/oband/finn
+./run-docker.sh build_dataflow /home/oband/finn/my_build
 ```
 
 If `vitis_hls` is not found, export it in the same shell before rerunning:
@@ -397,7 +373,8 @@ If `vitis_hls` is not found, export it in the same shell before rerunning:
 ```bash
 export PATH=/tools/Xilinx22_Full/Vitis_HLS/2022.2/bin:$PATH
 which vitis_hls
-python /home/oband/finn/src/finn/builder/build_dataflow.py .
+cd /home/oband/finn
+./run-docker.sh build_dataflow /home/oband/finn/my_build
 ```
 
 #### Full U250 bitfile build
@@ -427,8 +404,8 @@ For Alveo / Vitis builds you may also need platform-specific fields such as `vit
 Run the bitfile pass with the same terminal pattern:
 
 ```bash
-cd /home/oband/finn/my_build
-python /home/oband/finn/src/finn/builder/build_dataflow.py .
+cd /home/oband/finn
+./run-docker.sh build_dataflow /home/oband/finn/my_build
 ```
 
 #### Suggested build order
