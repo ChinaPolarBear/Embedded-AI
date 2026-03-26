@@ -276,7 +276,37 @@ cp deeponet_u250_int8_qonnx_finn.onnx /path/to/my_build/model.onnx
 
 #### Minimal terminal workflow
 
+运行的时候确保是在finn/my_build的路径下运行，尤其是修改json文件内容的时候
 Inside the FINN environment, the practical workflow used in this project is:
+
+Before running `run-docker.sh`, export the Xilinx-related environment variables in the same shell on the host side:
+
+```bash
+export FINN_XILINX_PATH=/tools/Xilinx22_Full
+export FINN_XILINX_VERSION=2022.2
+export HLS_PATH=/tools/Xilinx22_Full/Vitis_HLS/2022.2
+export VIVADO_PATH=/tools/Xilinx22_Full/Vivado/2022.2
+export VITIS_PATH=/tools/Xilinx22_Full/Vitis/2022.2
+export PLATFORM_REPO_PATHS=/path/to/your/platforms
+```
+
+Then check them:
+
+```bash
+echo $FINN_XILINX_PATH
+echo $FINN_XILINX_VERSION
+echo $HLS_PATH
+echo $VIVADO_PATH
+echo $VITIS_PATH
+echo $PLATFORM_REPO_PATHS
+ls $HLS_PATH
+```
+
+Notes:
+
+- `PLATFORM_REPO_PATHS` must point to the directory that contains the Vitis platform files for your Alveo target
+- if you do not have separate `Vitis` or `Vivado` directories in your installation, adjust `VITIS_PATH` and `VIVADO_PATH` to match your actual tool installation layout
+- the exports must be done before calling `./run-docker.sh build_dataflow ...`
 
 ```bash
 cd /home/oband/finn
@@ -368,11 +398,15 @@ cd /home/oband/finn
 ./run-docker.sh build_dataflow /home/oband/finn/my_build
 ```
 
-If `vitis_hls` is not found, export it in the same shell before rerunning:
+If `vitis_hls` is not found, export the tool variables again in the same shell before rerunning:
 
 ```bash
-export PATH=/tools/Xilinx22_Full/Vitis_HLS/2022.2/bin:$PATH
-which vitis_hls
+export FINN_XILINX_PATH=/tools/Xilinx22_Full
+export FINN_XILINX_VERSION=2022.2
+export HLS_PATH=/tools/Xilinx22_Full/Vitis_HLS/2022.2
+export VIVADO_PATH=/tools/Xilinx22_Full/Vivado/2022.2
+export VITIS_PATH=/tools/Xilinx22_Full/Vitis/2022.2
+export PLATFORM_REPO_PATHS=/path/to/your/platforms
 cd /home/oband/finn
 ./run-docker.sh build_dataflow /home/oband/finn/my_build
 ```
