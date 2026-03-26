@@ -274,6 +274,67 @@ Copy the FINN-ONNX model and rename it exactly to `model.onnx`:
 cp deeponet_u250_int8_qonnx_finn.onnx /path/to/my_build/model.onnx
 ```
 
+#### Minimal terminal workflow
+
+Inside the FINN Linux / Docker environment, a practical workflow is:
+
+```bash
+cd /home/oband/finn/my_build
+ls
+```
+
+At minimum, make sure this directory contains:
+
+- `model.onnx`
+- `dataflow_build_config.json`
+
+If `build_dataflow` is not available as a shell command, run the Python entry point directly:
+
+```bash
+python /home/oband/finn/src/finn/builder/build_dataflow.py .
+```
+
+If you are launching from the FINN repository root instead, you can also use:
+
+```bash
+cd /home/oband/finn
+./run-docker.sh build_dataflow /home/oband/finn/my_build
+```
+
+#### How to edit `dataflow_build_config.json` in terminal
+
+Open the config file inside `my_build`:
+
+```bash
+cd /home/oband/finn/my_build
+nano dataflow_build_config.json
+```
+
+After editing, verify the contents:
+
+```bash
+cat dataflow_build_config.json
+```
+
+If you prefer to overwrite the file directly from terminal, use:
+
+```bash
+cat > /home/oband/finn/my_build/dataflow_build_config.json <<'EOF'
+{
+  "output_dir": "output_u250_hw",
+  "synth_clk_period_ns": 5.0,
+  "fpga_part": "xcu250-figd2104-2L-e",
+  "generate_outputs": [
+    "estimate_reports",
+    "stitched_ip",
+    "rtlsim_performance",
+    "out_of_context_synth"
+  ],
+  "save_intermediate_models": true
+}
+EOF
+```
+
 #### Recommended first pass: estimate-only build
 
 Start with a light build before trying a full bitfile flow:
@@ -282,18 +343,17 @@ Start with a light build before trying a full bitfile flow:
 {
   "output_dir": "output_u250_estimate",
   "synth_clk_period_ns": 5.0,
+  "fpga_part": "xcu250-figd2104-2L-e",
   "generate_outputs": ["estimate_reports"],
-  "save_intermediate_models": true,
-  "verify_steps": ["initial_python", "streamlined_python"],
-  "verify_input_npy": "input.npy",
-  "verify_expected_output_npy": "expected_output.npy"
+  "save_intermediate_models": true
 }
 ```
 
-Then run inside the FINN Docker environment:
+Then run inside the FINN environment:
 
 ```bash
-./run-docker.sh build_dataflow /path/to/my_build
+cd /home/oband/finn/my_build
+python /home/oband/finn/src/finn/builder/build_dataflow.py .
 ```
 
 This is the safest first checkpoint because it verifies whether FINN can:
@@ -317,20 +377,28 @@ Once the estimate-only build is stable, expand the outputs:
     "rtlsim_performance",
     "out_of_context_synth"
   ],
-  "save_intermediate_models": true,
-  "verify_steps": [
-    "initial_python",
-    "streamlined_python",
-    "finn_onnx_python"
-  ],
-  "verify_input_npy": "input.npy",
-  "verify_expected_output_npy": "expected_output.npy"
+  "save_intermediate_models": true
 }
 ```
 
 This is usually the best stage for debugging performance and hardware-conversion issues without paying the full cost of bitfile generation.
 
 For this project and FINN setup, using `"fpga_part": "xcu250-figd2104-2L-e"` is more reliable than using `"board": "U250"` in the build config. Some FINN environments fail to resolve the board name during `step_specialize_layers`.
+
+Run the second pass with:
+
+```bash
+cd /home/oband/finn/my_build
+python /home/oband/finn/src/finn/builder/build_dataflow.py .
+```
+
+If `vitis_hls` is not found, export it in the same shell before rerunning:
+
+```bash
+export PATH=/tools/Xilinx22_Full/Vitis_HLS/2022.2/bin:$PATH
+which vitis_hls
+python /home/oband/finn/src/finn/builder/build_dataflow.py .
+```
 
 #### Full U250 bitfile build
 
@@ -355,6 +423,13 @@ For a shell-integrated Alveo build, extend the config toward a board-aware build
 ```
 
 For Alveo / Vitis builds you may also need platform-specific fields such as `vitis_platform`, depending on your FINN and Xilinx tool setup.
+
+Run the bitfile pass with the same terminal pattern:
+
+```bash
+cd /home/oband/finn/my_build
+python /home/oband/finn/src/finn/builder/build_dataflow.py .
+```
 
 #### Suggested build order
 
@@ -396,6 +471,12 @@ This helps catch problems during:
 - streamlining
 - FINN ONNX conversion
 - stitched IP simulation
+
+Important:
+
+- if you do not have `input.npy` and `expected_output.npy`, do not include `verify_steps`
+- also remove `verify_input_npy` and `verify_expected_output_npy` from `dataflow_build_config.json`
+- otherwise the build can fail simply because those files do not exist yet
 
 #### Practical warning for this project
 
