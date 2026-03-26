@@ -271,7 +271,9 @@ my_build/
 Copy the FINN-ONNX model and rename it exactly to `model.onnx`:
 
 ```bash
-cp deeponet_u250_int8_qonnx_finn.onnx /path/to/my_build/model.onnx
+cd /home/oband/finn/qonnx_models_new
+cp deeponet_u250_int8_qonnx_finn.onnx /home/oband/finn/my_build/model.onnx
+
 ```
 
 #### Minimal terminal workflow
@@ -287,7 +289,7 @@ export FINN_XILINX_VERSION=2022.2
 export HLS_PATH=/tools/Xilinx22_Full/Vitis_HLS/2022.2
 export VIVADO_PATH=/tools/Xilinx22_Full/Vivado/2022.2
 export VITIS_PATH=/tools/Xilinx22_Full/Vitis/2022.2
-export PLATFORM_REPO_PATHS=/path/to/your/platforms
+export PLATFORM_REPO_PATHS=/tools/Xilinx22_Full/platforms
 ```
 
 Then check them:
@@ -300,11 +302,13 @@ echo $VIVADO_PATH
 echo $VITIS_PATH
 echo $PLATFORM_REPO_PATHS
 ls $HLS_PATH
+find /tools/Xilinx22_Full -name "*.xpfm" | head
 ```
 
 Notes:
 
 - `PLATFORM_REPO_PATHS` must point to the directory that contains the Vitis platform files for your Alveo target
+- if `/tools/Xilinx22_Full/platforms` does not exist on your machine, use `find /tools/Xilinx22_Full -name "*.xpfm"` first and then set `PLATFORM_REPO_PATHS` to the directory that contains the relevant U250 platform files
 - if you do not have separate `Vitis` or `Vivado` directories in your installation, adjust `VITIS_PATH` and `VIVADO_PATH` to match your actual tool installation layout
 - the exports must be done before calling `./run-docker.sh build_dataflow ...`
 
@@ -376,7 +380,7 @@ export FINN_XILINX_VERSION=2022.2
 export HLS_PATH=/tools/Xilinx22_Full/Vitis_HLS/2022.2
 export VIVADO_PATH=/tools/Xilinx22_Full/Vivado/2022.2
 export VITIS_PATH=/tools/Xilinx22_Full/Vitis/2022.2
-export PLATFORM_REPO_PATHS=/path/to/your/platforms
+export PLATFORM_REPO_PATHS=/tools/Xilinx22_Full/platforms
 cd /home/oband/finn
 ./run-docker.sh build_dataflow /home/oband/finn/my_build
 ```
