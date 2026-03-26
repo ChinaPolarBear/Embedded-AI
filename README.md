@@ -268,6 +268,14 @@ my_build/
   expected_output.npy                 # optional, for verification
 ```
 
+To avoid repeatedly overwriting one JSON by hand, this repository also keeps three separate build-config templates:
+
+- `dataflow_build_config_estimate.json`
+- `dataflow_build_config_hw.json`
+- `dataflow_build_config_bitfile.json`
+
+These files are templates. Before each FINN run, copy the one you want to use into `my_build/dataflow_build_config.json`.
+
 Copy the FINN-ONNX model and rename it exactly to `model.onnx`:
 
 ```bash
@@ -341,6 +349,40 @@ cd /home/oband/finn
 ./run-docker.sh build_dataflow /home/oband/finn/my_build
 ```
 
+#### Recommended config switching workflow
+
+Instead of keeping multiple JSON blocks in one file, use one active config at a time:
+
+```bash
+cp /home/oband/finn/dataflow_build_config_estimate.json /home/oband/finn/my_build/dataflow_build_config.json
+```
+
+or:
+
+```bash
+cp /home/oband/finn/dataflow_build_config_hw.json /home/oband/finn/my_build/dataflow_build_config.json
+```
+
+or:
+
+```bash
+cp /home/oband/finn/dataflow_build_config_bitfile.json /home/oband/finn/my_build/dataflow_build_config.json
+```
+
+Then run:
+
+```bash
+cd /home/oband/finn
+./run-docker.sh build_dataflow /home/oband/finn/my_build
+```
+
+Important:
+
+- `dataflow_build_config.json` must contain exactly one valid JSON object
+- do not place two `{ ... }` blocks in the same file
+- standard JSON does not allow comments
+- the safest workflow is to keep separate config files and copy the one you need before each pass
+
 #### Recommended first pass: estimate-only build
 
 Start with a light build before trying a full bitfile flow:
@@ -358,6 +400,7 @@ Start with a light build before trying a full bitfile flow:
 Then run inside the FINN environment:
 
 ```bash
+cp /home/oband/finn/dataflow_build_config_estimate.json /home/oband/finn/my_build/dataflow_build_config.json
 cd /home/oband/finn
 ./run-docker.sh build_dataflow /home/oband/finn/my_build
 ```
@@ -394,6 +437,7 @@ For this project and FINN setup, using `"fpga_part": "xcu250-figd2104-2L-e"` is 
 Run the second pass with:
 
 ```bash
+cp /home/oband/finn/dataflow_build_config_hw.json /home/oband/finn/my_build/dataflow_build_config.json
 cd /home/oband/finn
 ./run-docker.sh build_dataflow /home/oband/finn/my_build
 ```
@@ -438,6 +482,7 @@ For Alveo / Vitis builds you may also need platform-specific fields such as `vit
 Run the bitfile pass with the same terminal pattern:
 
 ```bash
+cp /home/oband/finn/dataflow_build_config_bitfile.json /home/oband/finn/my_build/dataflow_build_config.json
 cd /home/oband/finn
 ./run-docker.sh build_dataflow /home/oband/finn/my_build
 ```

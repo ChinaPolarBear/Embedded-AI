@@ -1,0 +1,9 @@
+{
+  "output_dir": "output_u250_estimate",
+  "synth_clk_period_ns": 5.0,
+  "fpga_part": "xcu250-figd2104-2L-e",
+  "generate_outputs": [
+    "estimate_reports"
+  ],
+  "save_intermediate_models": true
+}
