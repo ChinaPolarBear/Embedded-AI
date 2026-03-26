@@ -268,14 +268,6 @@ my_build/
   expected_output.npy                 # optional, for verification
 ```
 
-To avoid repeatedly overwriting one JSON by hand, this repository also keeps three separate build-config templates:
-
-- `dataflow_build_config_estimate.json`
-- `dataflow_build_config_hw.json`
-- `dataflow_build_config_bitfile.json`
-
-These files are templates. Before each FINN run, copy the one you want to use into `my_build/dataflow_build_config.json`.
-
 Copy the FINN-ONNX model and rename it exactly to `model.onnx`:
 
 ```bash
@@ -344,121 +336,6 @@ cat dataflow_build_config.json
 
 Then run the build from the FINN root directory:
 
-```bash
-cd /home/oband/finn
-./run-docker.sh build_dataflow /home/oband/finn/my_build
-```
-
-#### Recommended config switching workflow
-
-Instead of keeping multiple JSON blocks in one file, use one active config at a time:
-
-```bash
-cp /home/oband/finn/dataflow_build_config_estimate.json /home/oband/finn/my_build/dataflow_build_config.json
-```
-
-or:
-
-```bash
-cp /home/oband/finn/dataflow_build_config_hw.json /home/oband/finn/my_build/dataflow_build_config.json
-```
-
-or:
-
-```bash
-cp /home/oband/finn/dataflow_build_config_bitfile.json /home/oband/finn/my_build/dataflow_build_config.json
-```
-
-Then run:
-
-```bash
-cd /home/oband/finn
-./run-docker.sh build_dataflow /home/oband/finn/my_build
-```
-
-Important:
-
-- `dataflow_build_config.json` must contain exactly one valid JSON object
-- do not place two `{ ... }` blocks in the same file
-- standard JSON does not allow comments
-- the safest workflow is to keep separate config files and copy the one you need before each pass
-
-#### Recommended first pass: estimate-only build
-
-Start with a light build before trying a full bitfile flow:
-
-```json
-{
-  "output_dir": "output_u250_estimate",
-  "synth_clk_period_ns": 5.0,
-  "fpga_part": "xcu250-figd2104-2L-e",
-  "generate_outputs": ["estimate_reports"],
-  "save_intermediate_models": true
-}
-```
-
-Then run inside the FINN environment:
-
-```bash
-cp /home/oband/finn/dataflow_build_config_estimate.json /home/oband/finn/my_build/dataflow_build_config.json
-cd /home/oband/finn
-./run-docker.sh build_dataflow /home/oband/finn/my_build
-```
-
-This is the safest first checkpoint because it verifies whether FINN can:
-
-- ingest your FINN-ONNX model
-- streamline it
-- estimate resources and performance
-
-#### Second pass: stitched IP / RTL simulation / OOC synthesis
-
-Once the estimate-only build is stable, expand the outputs:
-
-```json
-{
-  "output_dir": "output_u250_hw",
-  "synth_clk_period_ns": 5.0,
-  "fpga_part": "xcu250-figd2104-2L-e",
-  "generate_outputs": [
-    "estimate_reports",
-    "stitched_ip",
-    "rtlsim_performance",
-    "out_of_context_synth"
-  ],
-  "save_intermediate_models": true
-}
-```
-
-This is usually the best stage for debugging performance and hardware-conversion issues without paying the full cost of bitfile generation.
-
-For this project and FINN setup, using `"fpga_part": "xcu250-figd2104-2L-e"` is more reliable than using `"board": "U250"` in the build config. Some FINN environments fail to resolve the board name during `step_specialize_layers`.
-
-Run the second pass with:
-
-```bash
-cp /home/oband/finn/dataflow_build_config_hw.json /home/oband/finn/my_build/dataflow_build_config.json
-cd /home/oband/finn
-./run-docker.sh build_dataflow /home/oband/finn/my_build
-```
-
-If `vitis_hls` is not found, export the tool variables again in the same shell before rerunning:
-
-```bash
-export FINN_XILINX_PATH=/tools/Xilinx22_Full
-export FINN_XILINX_VERSION=2022.2
-export HLS_PATH=/tools/Xilinx22_Full/Vitis_HLS/2022.2
-export VIVADO_PATH=/tools/Xilinx22_Full/Vivado/2022.2
-export VITIS_PATH=/tools/Xilinx22_Full/Vitis/2022.2
-export PLATFORM_REPO_PATHS=/path/to/your/platforms
-cd /home/oband/finn
-./run-docker.sh build_dataflow /home/oband/finn/my_build
-```
-
-#### Full U250 bitfile build
-
-For a shell-integrated Alveo build, extend the config toward a board-aware build:
-
 ```json
 {
   "output_dir": "output_u250_bitfile",
@@ -477,27 +354,32 @@ For a shell-integrated Alveo build, extend the config toward a board-aware build
 }
 ```
 
-For Alveo / Vitis builds you may also need platform-specific fields such as `vitis_platform`, depending on your FINN and Xilinx tool setup.
-
-Run the bitfile pass with the same terminal pattern:
-
 ```bash
-cp /home/oband/finn/dataflow_build_config_bitfile.json /home/oband/finn/my_build/dataflow_build_config.json
 cd /home/oband/finn
 ./run-docker.sh build_dataflow /home/oband/finn/my_build
 ```
 
-#### Suggested build order
+Important:
 
-Use this progression instead of going straight to bitfile:
+- `dataflow_build_config.json` must contain exactly one valid JSON object
+- do not place two `{ ... }` blocks in the same file
+- standard JSON does not allow comments
+- if you change pass strategy later, overwrite the file contents instead of appending another JSON block
 
-1. `estimate_reports`
-2. `stitched_ip`
-3. `rtlsim_performance`
-4. `out_of_context_synth`
-5. `bitfile`
+For this project and FINN setup, using `"fpga_part": "xcu250-figd2104-2L-e"` is more reliable than using `"board": "U250"` in the build config. Some FINN environments fail to resolve the board name during `step_specialize_layers`.
 
-This shortens debug cycles and makes it much easier to see where the flow breaks.
+If `vitis_hls` is not found, export the tool variables again in the same shell before rerunning:
+
+```bash
+export FINN_XILINX_PATH=/tools/Xilinx22_Full
+export FINN_XILINX_VERSION=2022.2
+export HLS_PATH=/tools/Xilinx22_Full/Vitis_HLS/2022.2
+export VIVADO_PATH=/tools/Xilinx22_Full/Vivado/2022.2
+export VITIS_PATH=/tools/Xilinx22_Full/Vitis/2022.2
+export PLATFORM_REPO_PATHS=/path/to/your/platforms
+cd /home/oband/finn
+./run-docker.sh build_dataflow /home/oband/finn/my_build
+```
 
 #### Outputs to inspect after `build_dataflow`
 
@@ -512,21 +394,6 @@ FINN will place outputs under the `output_dir` specified in the JSON config. The
 - `report/ooc_synth_and_timing.json`
 - `report/rtlsim_performance.json`
 - `deploy/` for deployment packaging
-
-#### Verification advice
-
-If you are trying a new topology, it is a good idea to provide:
-
-- `input.npy`
-- `expected_output.npy`
-- `verify_steps`
-
-This helps catch problems during:
-
-- tidy-up
-- streamlining
-- FINN ONNX conversion
-- stitched IP simulation
 
 Important:
 
