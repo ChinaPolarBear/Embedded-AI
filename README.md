@@ -289,7 +289,8 @@ export FINN_XILINX_VERSION=2022.2
 export HLS_PATH=/tools/Xilinx22_Full/Vitis_HLS/2022.2
 export VIVADO_PATH=/tools/Xilinx22_Full/Vivado/2022.2
 export VITIS_PATH=/tools/Xilinx22_Full/Vitis/2022.2
-export PLATFORM_REPO_PATHS=/tools/Xilinx22_Full/platforms
+export PLATFORM_REPO_PATHS=/opt/xilinx/platforms
+#export NUM_DEFAULT_WORKERS=1 (add it if the system is shutted down)
 ```
 
 Then check them:
