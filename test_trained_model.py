@@ -3,6 +3,8 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
+from plot_output_utils import make_figure_output_dir, save_figure
+
 # ============================================================
 # Import from your DEMO training script
 # If your file name differs, change it here.
@@ -77,7 +79,7 @@ def overlay_text(ax, text: str):
     )
 
 
-def plot_demo_style(t_np, A0_np, AL_clean_np, AL_noisy_np, A_pred, title_prefix: str):
+def plot_demo_style(t_np, A0_np, AL_clean_np, AL_noisy_np, A_pred, title_prefix: str, output_dir):
     # metrics
     evm_clean = evm_rms_pct(A_pred, AL_clean_np)
     evm_obs = evm_rms_pct(A_pred, AL_noisy_np)
@@ -102,6 +104,7 @@ def plot_demo_style(t_np, A0_np, AL_clean_np, AL_noisy_np, A_pred, title_prefix:
     ax.legend()
     overlay_text(ax, info)
     fig.tight_layout()
+    save_figure(fig, output_dir, "amplitude_comparison")
     plt.show()
 
     # ---------------- Figure 2: Constellation ----------------
@@ -118,6 +121,7 @@ def plot_demo_style(t_np, A0_np, AL_clean_np, AL_noisy_np, A_pred, title_prefix:
     ax.set_aspect("equal", "box")
     overlay_text(ax, info)
     fig.tight_layout()
+    save_figure(fig, output_dir, "constellation_comparison")
     plt.show()
 
     # ---------------- Figure 3: Amplitude Error ----------------
@@ -134,11 +138,14 @@ def plot_demo_style(t_np, A0_np, AL_clean_np, AL_noisy_np, A_pred, title_prefix:
     ax.grid(True)
     overlay_text(ax, info)
     fig.tight_layout()
+    save_figure(fig, output_dir, "amplitude_error")
     plt.show()
 
 
 def main():
     print_config()
+    output_dir = make_figure_output_dir(__file__)
+    print(f"Saving evaluation figures to {output_dir}")
     model = load_trained_model(MODEL_PATH)
 
     t_np = t_grid.cpu().numpy()
@@ -181,7 +188,7 @@ def main():
     # plot best sample
     A0_np, AL_clean_np, AL_noisy_np, A_pred = best
     title_prefix = "Amplitude at z = L (Best Test Sample, Demo-style)"
-    plot_demo_style(t_np, A0_np, AL_clean_np, AL_noisy_np, A_pred, title_prefix)
+    plot_demo_style(t_np, A0_np, AL_clean_np, AL_noisy_np, A_pred, title_prefix, output_dir)
 
 
 if __name__ == "__main__":

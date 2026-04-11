@@ -8,7 +8,7 @@ import warnings
 import onnx
 from onnx import numpy_helper
 from qonnx.core.modelwrapper import ModelWrapper
-from qonnx.transformation.general import SortGraph
+from qonnx.transformation.general import GiveReadableTensorNames, GiveUniqueNodeNames, SortGraph
 from qonnx.transformation.infer_datatypes import InferDataTypes
 from qonnx.transformation.infer_shapes import InferShapes
 from qonnx.util.cleanup import cleanup_model
@@ -222,6 +222,10 @@ def convert_qonnx_to_finn(
         validate_linear_nodes(prepared_model, verbose=True)
         raise RuntimeError(f"ConvertQONNXtoFINN failed: {exc}") from exc
 
+    # ConvertQONNXtoFINN can introduce unnamed nodes, which later cause empty
+    # HLS top-function names such as `top_.cpp` / `set_top` with no argument.
+    finn_model = finn_model.transform(GiveUniqueNodeNames())
+    finn_model = finn_model.transform(GiveReadableTensorNames())
     finn_model = finn_model.transform(InferShapes())
     finn_model = finn_model.transform(InferDataTypes())
     onnx.checker.check_model(finn_model.model)

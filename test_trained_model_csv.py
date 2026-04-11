@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
+from plot_output_utils import make_figure_output_dir, save_figure
 from pinn_physics_model import (
     DeepONet, N_t, P_dim, fourier_dim,
     t_grid, L, device, MODEL_PATH,
@@ -104,9 +105,9 @@ def metrics(pred: np.ndarray, true: np.ndarray, eps: float = 1e-12):
     }
 
 
-def plot_compare(tx_win: np.ndarray, rx_true: np.ndarray, rx_pred: np.ndarray, title: str):
+def plot_compare(tx_win: np.ndarray, rx_true: np.ndarray, rx_pred: np.ndarray, title: str, output_dir, file_prefix: str):
     x = np.arange(len(tx_win))
-    plt.figure(figsize=(12, 4))
+    fig = plt.figure(figsize=(12, 4))
     plt.plot(
         x, np.abs(tx_win),
         color="gray", linestyle=":", alpha=0.6,
@@ -129,9 +130,10 @@ def plot_compare(tx_win: np.ndarray, rx_true: np.ndarray, rx_pred: np.ndarray, t
     plt.grid(True)
     plt.legend()
     plt.tight_layout()
+    save_figure(fig, output_dir, f"{file_prefix}_amplitude_compare")
     plt.show()
 
-    plt.figure(figsize=(6, 6))
+    fig = plt.figure(figsize=(6, 6))
     plt.scatter(
     rx_true.real, rx_true.imag,
     s=12, alpha=0.35,
@@ -152,15 +154,17 @@ def plot_compare(tx_win: np.ndarray, rx_true: np.ndarray, rx_pred: np.ndarray, t
     plt.legend()
     plt.gca().set_aspect("equal", "box")
     plt.tight_layout()
+    save_figure(fig, output_dir, f"{file_prefix}_constellation_compare")
     plt.show()
 
-    plt.figure(figsize=(12, 3))
+    fig = plt.figure(figsize=(12, 3))
     plt.plot(x, np.abs(rx_pred) - np.abs(rx_true))
     plt.xlabel("Sample index (window)")
     plt.ylabel("|pred|-|true|")
     plt.title(title + " (Amplitude error)")
     plt.grid(True)
     plt.tight_layout()
+    save_figure(fig, output_dir, f"{file_prefix}_amplitude_error")
     plt.show()
 
 
@@ -177,6 +181,8 @@ def parse_args():
 
 def main():
     args = parse_args()
+    output_dir = make_figure_output_dir(__file__)
+    print(f"Saving evaluation figures to {output_dir}")
 
     if not os.path.isfile(args.csv):
         raise FileNotFoundError(f"CSV not found: {args.csv}")
@@ -212,7 +218,8 @@ def main():
 
     title = f"{os.path.basename(args.csv)} | win={args.window} start={start_idx} | " \
             f"NRMSE={m['c_nrmse']:.3e}, EVM={m['evm_pct']:.2f}%"
-    plot_compare(tx_win, rx_true, rx_pred, title)
+    file_prefix = os.path.splitext(os.path.basename(args.csv))[0]
+    plot_compare(tx_win, rx_true, rx_pred, title, output_dir, file_prefix)
 
 
 if __name__ == "__main__":

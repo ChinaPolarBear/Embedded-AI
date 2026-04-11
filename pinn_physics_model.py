@@ -4,6 +4,8 @@ import torch.optim as optim
 import numpy as np
 import matplotlib.pyplot as plt
 
+from plot_output_utils import make_figure_output_dir, save_figure
+
 # ============================================================
 # 1) 全局配置 & 物理参数 (NLSE / 光纤参数 + 训练超参)
 # ============================================================
@@ -630,6 +632,8 @@ def train_model(model, optimizer, scheduler, A0_train, AL_clean_train, AL_noisy_
 
 def evaluate_and_plot(model, A0_test, AL_clean_test, AL_noisy_test, title_suffix="Hybrid PINN DeepONet"):
     model.eval()
+    output_dir = make_figure_output_dir(__file__)
+    print(f"Saving evaluation figures to {output_dir}")
 
     # 随机挑一条测试样本画图
     idx = np.random.randint(0, len(A0_test))
@@ -653,7 +657,7 @@ def evaluate_and_plot(model, A0_test, AL_clean_test, AL_noisy_test, title_suffix
     AL_noisy_np = AL_noisy.cpu().numpy()
 
     # --- 图1：幅度对比 ---
-    plt.figure(figsize=(12, 4))
+    fig = plt.figure(figsize=(12, 4))
     plt.plot(t_np, np.abs(AL_noisy_np), label="SSFM+AWGN |A_obs(L)|", alpha=0.7)
     plt.plot(t_np, np.abs(AL_clean_np), label="SSFM clean |A_clean(L)|", alpha=0.7)
     plt.plot(t_np, np.abs(A_pred), '--', label="PINN pred (clean)")
@@ -663,10 +667,11 @@ def evaluate_and_plot(model, A0_test, AL_clean_test, AL_noisy_test, title_suffix
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
+    save_figure(fig, output_dir, "amplitude_at_z_L")
     plt.show()
 
     # --- 图2：星座图（I/Q） ---
-    plt.figure(figsize=(6, 6))
+    fig = plt.figure(figsize=(6, 6))
     plt.scatter(AL_noisy_np.real, AL_noisy_np.imag, s=10, alpha=0.4, label="SSFM+AWGN (obs)")
     plt.scatter(A_pred.real, A_pred.imag, s=10, alpha=0.7, label="PINN pred (clean)")
     plt.axhline(0, color='gray', linewidth=0.5)
@@ -678,13 +683,14 @@ def evaluate_and_plot(model, A0_test, AL_clean_test, AL_noisy_test, title_suffix
     plt.grid(True)
     plt.gca().set_aspect('equal', 'box')
     plt.tight_layout()
+    save_figure(fig, output_dir, "constellation_at_z_L")
     plt.show()
 
     # --- 图3：幅度误差 ---
     amp_err_clean = np.abs(A_pred) - np.abs(AL_clean_np)
     amp_err_obs   = np.abs(A_pred) - np.abs(AL_noisy_np)
 
-    plt.figure(figsize=(12, 3))
+    fig = plt.figure(figsize=(12, 3))
     plt.plot(t_np, amp_err_clean, label="Error vs clean")
     plt.plot(t_np, amp_err_obs,   label="Error vs obs", alpha=0.7)
     plt.xlabel("Time")
@@ -693,6 +699,7 @@ def evaluate_and_plot(model, A0_test, AL_clean_test, AL_noisy_test, title_suffix
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
+    save_figure(fig, output_dir, "amplitude_error_at_z_L")
     plt.show()
 
 

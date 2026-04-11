@@ -136,6 +136,7 @@ def export_model_to_qonnx(model: nn.Module, qonnx_out: str) -> None:
         export_model,
         args=dummy,
         export_path=qonnx_out,
+        dynamo=False,
         opset_version=13,
         input_names=["u_in"],
         output_names=["y_out"],

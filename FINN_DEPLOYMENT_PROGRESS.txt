@@ -1,0 +1,99 @@
+FINN Deployment Progress Log
+Date: 2026-03-26
+
+Project:
+- Embedded-AI
+- Target platform: Xilinx Alveo U250
+
+Current overall status:
+- Local model-side export flow has been brought to a runnable state.
+- FINN deployment flow has progressed through QONNX export and FINN-ONNX conversion.
+- build_dataflow has been attempted in the FINN environment.
+- The current blocking issue is at step_hw_ipgen because vitis_hls is not available in PATH inside the environment that runs build_dataflow.
+
+Completed steps so far:
+1. step1_export_trunk_matrices.py
+- trunk matrices were exported successfully.
+- artifact used: trunk_matrices.npz
+
+2. step2_deploy_float_sanity.py
+- frozen-trunk float deploy sanity flow was prepared and used in the deployment chain.
+
+3. step3_brevitas_qat_export_qonnx.py
+- step3 originally failed during QONNX export because the exporter path conflicted with the newer PyTorch dynamo exporter.
+- the export path was adjusted to use dynamo=False.
+- result: raw QONNX export succeeded.
+- artifact produced: deeponet_u250_int8_qonnx.onnx
+
+4. step4.1_export_QONNX_ready_model.py
+- QONNX cleanup / validation succeeded.
+- artifact produced: deeponet_u250_int8_qonnx_ready.onnx
+
+5. step4.2_convert_qonnx_to_finn.py
+- FINN-ONNX conversion succeeded.
+- artifact produced: deeponet_u250_int8_qonnx_finn.onnx
+
+6. build_dataflow setup
+- my_build directory structure has been prepared conceptually around:
+  - model.onnx
+  - dataflow_build_config.json
+- output directories such as output_u250_estimate, output_u250_hw, and output_u250_bitfile are expected to be created under my_build/.
+
+Issues encountered during FINN build flow:
+
+Issue A: step_specialize_layers
+- Error observed:
+  TypeError: can only concatenate str (not "NoneType") to str
+- Root cause:
+  fpga_part / board resolution failed inside build_dataflow_config.py
+- Resolution found:
+  using "fpga_part": "xcu250-figd2104-2L-e" works more reliably than using "board": "U250" in the current FINN environment
+
+Issue B: step_hw_ipgen
+- Current blocking error:
+  AssertionError: vitis_hls not found in PATH
+- Traceback summary:
+  the flow reaches HLSSynthIP(), then FINN tries to call vitis_hls for HLS IP generation, but the current runtime environment does not have vitis_hls on PATH
+- Important note:
+  vitis_hls has been found at:
+  /tools/Xilinx22_Full/Vitis_HLS/2022.2/bin/vitis_hls
+- Current interpretation:
+  the problem is not the JSON config itself
+  the problem is that the shell / container / environment executing build_dataflow does not have this path exported into PATH
+
+Current optional files status:
+- folding_config.json: not created
+- specialize_layers_config.json: not created
+- input.npy: not created
+- expected_output.npy: not created
+
+Impact of missing optional files:
+- folding_config.json:
+  currently not required for basic flow bring-up
+- specialize_layers_config.json:
+  currently not required unless custom specialization control is needed
+- input.npy and expected_output.npy:
+  only required if verify steps reference them
+  if verify_input_npy / verify_expected_output_npy are present in dataflow_build_config.json, then these files must exist
+
+Current recommended next action:
+1. Ensure the exact shell that runs build_dataflow can resolve vitis_hls.
+2. In that same shell, export:
+   /tools/Xilinx22_Full/Vitis_HLS/2022.2/bin
+   into PATH before rerunning build_dataflow.
+3. If available, also source the corresponding Xilinx settings scripts for the installed toolchain.
+4. Rerun build_dataflow after confirming:
+   which vitis_hls
+   returns the correct path.
+
+Useful checkpoint artifacts already produced:
+- trunk_matrices.npz
+- deeponet_u250_int8_qonnx.onnx
+- deeponet_u250_int8_qonnx_ready.onnx
+- deeponet_u250_int8_qonnx_finn.onnx
+
+Personal reminder:
+- The deployment flow has already passed the raw QONNX export stage.
+- The deployment flow has already passed the FINN-ready QONNX stage.
+- The deployment flow has already passed FINN-ONNX conversion.
+- The current blocker is in hardware IP generation environment setup, not in the earlier model export logic.
