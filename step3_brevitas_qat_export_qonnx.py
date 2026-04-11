@@ -147,7 +147,26 @@ def export_model_to_qonnx(model: nn.Module, qonnx_out: str) -> None:
     print("Next: run step4.1_export_QONNX_ready_model.py before ConvertQONNXtoFINN().")
 
 
-def main(mat: str, epochs: int, qonnx_out: str, lr: float):
+def load_supervised_dataset(n_samples: int, snr_db: float, force_rebuild_cache: bool):
+    if not force_rebuild_cache:
+        train_cached = pm.load_dataset_cache(
+            pm.N_train,
+            pm.snr_db_train,
+            cache_key=pm.TRAIN_DATASET_CACHE_KEY,
+        )
+        if train_cached is not None and n_samples <= train_cached[0].shape[0]:
+            print(f"[OK] Reusing first {n_samples} samples from training cache for Step 3.")
+            return tuple(t[:n_samples] for t in train_cached)
+
+    return pm.build_dataset(
+        n_samples=n_samples,
+        snr_db=snr_db,
+        cache_key=pm.QAT_DATASET_CACHE_KEY,
+        force_rebuild=force_rebuild_cache,
+    )
+
+
+def main(mat: str, epochs: int, qonnx_out: str, lr: float, dataset_samples: int, force_rebuild_cache: bool):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     data = np.load(mat)
@@ -157,7 +176,11 @@ def main(mat: str, epochs: int, qonnx_out: str, lr: float):
     model = DeepONetFinnDeployInt8(M_real=M_real, M_imag=M_imag, hidden=pm.branch_hidden).to(device)
     model.train()
 
-    A0, AL_clean, _ = pm.build_dataset(n_samples=256, snr_db=pm.snr_db_train)
+    A0, AL_clean, _ = load_supervised_dataset(
+        n_samples=dataset_samples,
+        snr_db=pm.snr_db_train,
+        force_rebuild_cache=force_rebuild_cache,
+    )
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=lr)
 
     for ep in range(1, epochs + 1):
@@ -187,5 +210,14 @@ if __name__ == "__main__":
     ap.add_argument("--epochs", type=int, default=10)
     ap.add_argument("--qonnx_out", type=str, default="deeponet_u250_int8_qonnx.onnx")
     ap.add_argument("--lr", type=float, default=5e-4)
+    ap.add_argument("--dataset_samples", type=int, default=256)
+    ap.add_argument("--force_rebuild_cache", action="store_true")
     args = ap.parse_args()
-    main(args.mat, args.epochs, args.qonnx_out, args.lr)
+    main(
+        args.mat,
+        args.epochs,
+        args.qonnx_out,
+        args.lr,
+        args.dataset_samples,
+        args.force_rebuild_cache,
+    )

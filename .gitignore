@@ -20,6 +20,8 @@ Thumbs.db
 
 # Generated data
 Data_Output/
+dataset_cache/
+figures/
 *.csv
 
 # Trained models and exported artifacts

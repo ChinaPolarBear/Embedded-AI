@@ -83,6 +83,9 @@ The current repository includes:
 - `deeponet_u250_int8_qonnx_finn.onnx`
   FINN-ONNX model produced by Step 4.2 by default.
 
+- `dataset_cache/`
+  Cached training / test / Step 3 supervised datasets generated from SSFM to avoid rebuilding the same waveforms every run.
+
 ## Dependencies
 
 The current `requirements.txt` covers the local Python-side workflow:
@@ -128,6 +131,8 @@ Recommended practical setup:
 python pinn_physics_model.py
 ```
 
+The training script now caches the generated train/test datasets under `dataset_cache/` and reuses them on later runs if the waveform and SSFM settings still match.
+
 ### 2. Optional evaluation
 
 ```bash
@@ -151,6 +156,12 @@ python step2_deploy_float_sanity.py --ckpt hybrid_pinn_deeponet.pth --mat trunk_
 
 ```bash
 python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 10 --qonnx_out deeponet_u250_int8_qonnx.onnx
+```
+
+Step 3 now tries to reuse the training cache first and only rebuilds a separate supervised dataset if that cache is missing. You can force a refresh with:
+
+```bash
+python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --force_rebuild_cache
 ```
 
 What Step 3 now does:
