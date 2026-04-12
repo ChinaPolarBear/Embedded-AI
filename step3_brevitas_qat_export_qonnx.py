@@ -112,14 +112,30 @@ class DeepONetFinnDeployInt8(nn.Module):
         return torch.stack([real, imag], dim=1)
 
 
-def make_supervised_batch(A0_batch: torch.Tensor, AL_clean_batch: torch.Tensor):
+def crop_targets(AL_clean_batch: torch.Tensor, n_t_out: int, time_indices: torch.Tensor | None):
+    if n_t_out == pm.N_t and time_indices is None:
+        return AL_clean_batch
+
+    if time_indices is not None:
+        return AL_clean_batch[:, time_indices]
+
+    start = (pm.N_t - n_t_out) // 2
+    return AL_clean_batch[:, start:start + n_t_out]
+
+
+def make_supervised_batch(
+    A0_batch: torch.Tensor,
+    AL_clean_batch: torch.Tensor,
+    n_t_out: int,
+    time_indices: torch.Tensor | None,
+):
     """
     A0_batch, AL_clean_batch: complex [B, N_t]
     returns:
       u_in: [B, 2*N_t]
-      y_real,y_imag: [B, N_t]
+      y_real,y_imag: [B, n_t_out]
     """
-
+    AL_clean_batch = crop_targets(AL_clean_batch, n_t_out, time_indices)
     u_in = pm.make_branch_input(A0_batch)
     y_real = AL_clean_batch.real
     y_imag = AL_clean_batch.imag
@@ -166,14 +182,26 @@ def load_supervised_dataset(n_samples: int, snr_db: float, force_rebuild_cache: 
     )
 
 
-def main(mat: str, epochs: int, qonnx_out: str, lr: float, dataset_samples: int, force_rebuild_cache: bool):
+def main(
+    mat: str,
+    epochs: int,
+    qonnx_out: str,
+    lr: float,
+    dataset_samples: int,
+    force_rebuild_cache: bool,
+    hidden: int,
+):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     data = np.load(mat)
     M_real = torch.from_numpy(data["M_real"]).float().to(device)
     M_imag = torch.from_numpy(data["M_imag"]).float().to(device)
+    time_indices = None
+    if "time_indices" in data.files:
+        time_indices = torch.from_numpy(data["time_indices"]).long().to(device)
+    n_t_out = int(M_real.shape[0])
 
-    model = DeepONetFinnDeployInt8(M_real=M_real, M_imag=M_imag, hidden=pm.branch_hidden).to(device)
+    model = DeepONetFinnDeployInt8(M_real=M_real, M_imag=M_imag, hidden=hidden).to(device)
     model.train()
 
     A0, AL_clean, _ = load_supervised_dataset(
@@ -188,7 +216,7 @@ def main(mat: str, epochs: int, qonnx_out: str, lr: float, dataset_samples: int,
         total = 0.0
         for i in range(0, A0.shape[0], 32):
             idx = perm[i : i + 32]
-            u_in, y_r, y_i = make_supervised_batch(A0[idx], AL_clean[idx])
+            u_in, y_r, y_i = make_supervised_batch(A0[idx], AL_clean[idx], n_t_out, time_indices)
             pred = model(u_in)
             pred_r = pred[:, 0, :]
             pred_i = pred[:, 1, :]
@@ -212,6 +240,7 @@ if __name__ == "__main__":
     ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--dataset_samples", type=int, default=256)
     ap.add_argument("--force_rebuild_cache", action="store_true")
+    ap.add_argument("--hidden", type=int, default=pm.branch_hidden)
     args = ap.parse_args()
     main(
         args.mat,
@@ -220,4 +249,5 @@ if __name__ == "__main__":
         args.lr,
         args.dataset_samples,
         args.force_rebuild_cache,
+        args.hidden,
     )
