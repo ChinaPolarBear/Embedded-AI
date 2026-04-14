@@ -1,6 +1,5 @@
 FINN Deployment Progress Log
-Date: 2026-03-26
-
+Date: 2026-04-13
 Project:
 - Embedded-AI
 - Target platform: Xilinx Alveo U250
@@ -60,6 +59,47 @@ Issue B: step_hw_ipgen
 - Current interpretation:
   the problem is not the JSON config itself
   the problem is that the shell / container / environment executing build_dataflow does not have this path exported into PATH
+
+
+Challenges Encountered During Development and Solutions
+-QONNX to FINN-ONNX conversion issues
+During model export, compatibility problems arose related to quantization formats, supported operators, and node mapping.
+Solution: Carefully verified the Brevitas export flow and completed the pipeline step by step, including raw QONNX export, FINN-ready conversion, and FINN-ONNX conversion.
+
+-HLS / RTL node naming issues
+Some hardware node names did not comply with FINN / Vivado naming rules, which caused synthesis failures.
+Solution: Reviewed node naming conventions and standardized layer names to avoid unsupported characters.
+
+-Stitched IP integration issues
+When integrating multiple generated IP blocks, interface mismatches and clock domain configuration issues occurred.
+Solution: Checked stitched IP interface mappings and ensured proper AXI / AXI-Stream connectivity.
+
+-Platform configuration issues
+During deployment to the Alveo U250 platform, incorrect platform paths or board configuration settings caused build errors.
+Solution: Verified the target platform configuration and ensured consistency between shell, board, and deployment settings.
+
+-HLS toolchain environment configuration issue (current main bottleneck)
+When the FINN flow reached the HLSSynthIP() stage, FINN attempted to call vitis_hls for HLS IP generation. However, the current runtime environment did not have vitis_hls correctly configured in the system PATH.
+Although the tool was detected at:
+/tools/Xilinx22_Full/Vitis_HLS/2022.2/bin/vitis_hls
+this path was not properly exported in the shell / container environment used to run build_dataflow.
+Solution:
+Export /tools/Xilinx22_Full/Vitis_HLS/2022.2/bin into PATH in the same shell used for running the build;
+Source the corresponding Xilinx environment setup scripts;
+Verify the setup using which vitis_hls;
+Rerun the FINN dataflow build.
+
+-Step 16 resource pressure issue
+Resource utilization became a concern during synthesis and implementation, particularly for LUT, BRAM, and DSP usage.
+Solution: Optimized quantization bit width, reduced parallelism, and adjusted folding parameters.
+
+-Step 17 unexpected EOF issue
+Build interruptions and script execution failures caused unexpected EOF errors during the later stages of the flow.
+Solution: Checked shell scripts, build logs, environment consistency, and available disk space.
+.xclbin generation issue
+The final FPGA bitstream packaging occasionally failed, preventing successful deployment.
+Solution: Investigated Vivado / Vitis build logs and verified platform, linker, and IP integration settings.
+
 
 Current optional files status:
 - folding_config.json: not created
