@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 from plot_output_utils import make_figure_output_dir, save_figure
 
@@ -61,6 +62,11 @@ fourier_dim   = 64   # Fourier feature dimension for trunk input (t,z)
 
 # 模型保存路径
 MODEL_PATH = "hybrid_pinn_deeponet.pth"
+SSFM_N_STEPS = 200
+DATASET_CACHE_DIR = Path("dataset_cache")
+TRAIN_DATASET_CACHE_KEY = "train"
+TEST_DATASET_CACHE_KEY = "test"
+QAT_DATASET_CACHE_KEY = "qat_supervised"
 
 
 # ============================================================
@@ -78,7 +84,7 @@ freq  = torch.fft.fftfreq(N_t, d=dt).to(device)
 omega = 2 * np.pi * freq
 
 
-def ssfm_propagate(A0_complex, L_dist, n_steps=200):
+def ssfm_propagate(A0_complex, L_dist, n_steps=SSFM_N_STEPS):
     """
     Split-Step Fourier Method (SSFM) for NLSE.
     输入:
@@ -267,7 +273,49 @@ def add_awgn(signal: torch.Tensor, snr_db: float):
     return signal + noise
 
 
-def build_dataset(n_samples, snr_db):
+def _dataset_cache_metadata(n_samples, snr_db):
+    return {
+        "n_samples": int(n_samples),
+        "snr_db": float(snr_db),
+        "N_t": int(N_t),
+        "L": float(L),
+        "num_symbols": int(num_symbols),
+        "sps": int(sps),
+        "rrc_beta": float(rrc_beta),
+        "rrc_span": int(rrc_span),
+        "ssfm_n_steps": int(SSFM_N_STEPS),
+    }
+
+
+def get_dataset_cache_path(n_samples, snr_db, cache_key="dataset", cache_dir=DATASET_CACHE_DIR):
+    safe_key = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(cache_key))
+    snr_token = str(float(snr_db)).replace("-", "m").replace(".", "p")
+    return Path(cache_dir) / f"{safe_key}_n{int(n_samples)}_snr{snr_token}.pt"
+
+
+def load_dataset_cache(n_samples, snr_db, cache_key="dataset", cache_dir=DATASET_CACHE_DIR):
+    cache_path = get_dataset_cache_path(n_samples, snr_db, cache_key=cache_key, cache_dir=cache_dir)
+    if not cache_path.is_file():
+        return None
+
+    payload = torch.load(cache_path, map_location="cpu")
+    expected_meta = _dataset_cache_metadata(n_samples, snr_db)
+    cached_meta = payload.get("meta", {})
+
+    for key, value in expected_meta.items():
+        if cached_meta.get(key) != value:
+            print(f"[WARN] Cache metadata mismatch for {cache_path}, ignoring stale cache.")
+            return None
+
+    print(f"[OK] Loaded dataset cache: {cache_path}")
+    return (
+        payload["A0"].to(device),
+        payload["AL_clean"].to(device),
+        payload["AL_noisy"].to(device),
+    )
+
+
+def build_dataset(n_samples, snr_db, cache_key="dataset", cache_dir=DATASET_CACHE_DIR, force_rebuild=False):
     """
     构建训练/测试数据集：
       - A0: 输入 A(0,t)
@@ -278,6 +326,15 @@ def build_dataset(n_samples, snr_db):
       - PDE/IC/clean anchor 主要贴合 AL_clean（学习物理+真值）
       - obs loss 让模型知道观测噪声存在，但不要硬去拟合噪声纹理
     """
+    if not force_rebuild:
+        cached = load_dataset_cache(n_samples, snr_db, cache_key=cache_key, cache_dir=cache_dir)
+        if cached is not None:
+            return cached
+
+    cache_path = get_dataset_cache_path(n_samples, snr_db, cache_key=cache_key, cache_dir=cache_dir)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"[CACHE MISS] Building dataset from SSFM: {cache_path}")
+
     A0_all = torch.zeros(n_samples, N_t, dtype=torch.complex64, device=device)
     AL_clean_all = torch.zeros_like(A0_all)
     AL_noisy_all = torch.zeros_like(A0_all)
@@ -296,6 +353,17 @@ def build_dataset(n_samples, snr_db):
         A0_all[n] = A0
         AL_clean_all[n] = AL_clean
         AL_noisy_all[n] = AL_noisy
+
+    torch.save(
+        {
+            "meta": _dataset_cache_metadata(n_samples, snr_db),
+            "A0": A0_all.detach().cpu(),
+            "AL_clean": AL_clean_all.detach().cpu(),
+            "AL_noisy": AL_noisy_all.detach().cpu(),
+        },
+        cache_path,
+    )
+    print(f"[OK] Saved dataset cache: {cache_path}")
 
     return A0_all, AL_clean_all, AL_noisy_all
 
@@ -709,10 +777,18 @@ def evaluate_and_plot(model, A0_test, AL_clean_test, AL_noisy_test, title_suffix
 
 def main():
     print("Building training dataset with SSFM...")
-    A0_train, ALc_train, ALn_train = build_dataset(N_train, snr_db_train)
+    A0_train, ALc_train, ALn_train = build_dataset(
+        N_train,
+        snr_db_train,
+        cache_key=TRAIN_DATASET_CACHE_KEY,
+    )
 
     print("Building test dataset with SSFM...")
-    A0_test,  ALc_test,  ALn_test  = build_dataset(N_test, snr_db_eval)
+    A0_test,  ALc_test,  ALn_test  = build_dataset(
+        N_test,
+        snr_db_eval,
+        cache_key=TEST_DATASET_CACHE_KEY,
+    )
 
     model, optimizer, scheduler = create_model()
 
