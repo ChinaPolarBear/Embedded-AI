@@ -21,6 +21,8 @@ The current repository includes:
 - float deploy sanity checking
 - Brevitas-based QONNX export
 - QONNX cleanup / validation before FINN conversion
+- verification I/O generation for FINN / board-side checking
+- deployed-output comparison against saved reference tensors
 
 ## Main Files
 
@@ -63,6 +65,12 @@ The current repository includes:
 - `step4.2_convert_qonnx_to_finn.py`
   Runs the same preparation flow and then calls `ConvertQONNXtoFINN()` to generate FINN-ONNX.
 
+- `step5_generate_verification_io.py`
+  Generates `input.npy` and `expected_output.npy` from the exported deploy model so FINN verification and board-side checking use the same reference tensors.
+
+- `step6_compare_deploy_output.py`
+  Compares actual runtime / board output against `expected_output.npy` and reports max error, RMSE, relative RMSE, and pass/fail against tolerances.
+
 - `finn_qonnx_utils.py`
   Shared helpers for QONNX export compatibility, graph cleanup, shape/datatype inference, and `Gemm` / `MatMul` validation.
 
@@ -79,6 +87,12 @@ The current repository includes:
 
 - `deeponet_u250_int8_qonnx_ready.onnx`
   Cleaned and validated QONNX export from Step 4.1, or the `_ready` intermediate written by Step 4.2 before FINN conversion.
+
+- `verification_io/input.npy`
+  Deploy-model input tensor that can be copied into the FINN build directory or used for board-side testing.
+
+- `verification_io/expected_output.npy`
+  Reference deploy-model output tensor paired with `input.npy`.
 
 - `deeponet_u250_int8_qonnx_finn.onnx`
   FINN-ONNX model produced by Step 4.2 by default.
@@ -440,6 +454,52 @@ Important:
 - if you do not have `input.npy` and `expected_output.npy`, do not include `verify_steps`
 - also remove `verify_input_npy` and `verify_expected_output_npy` from `dataflow_build_config.json`
 - otherwise the build can fail simply because those files do not exist yet
+
+### 9. Generate verification input/output
+
+This is the missing step if you want to prove that deployed inference matches the exported model, instead of only proving that the FINN build completed.
+
+Run this inside an environment that has `qonnx`, for example `.venv_finn` or the FINN environment:
+
+```bash
+python step5_generate_verification_io.py \
+  --model deeponet_u250_int8_qonnx_ready.onnx \
+  --out_dir verification_io
+```
+
+This will generate:
+
+- `verification_io/input.npy`
+- `verification_io/expected_output.npy`
+- `verification_io/verification_case.npz`
+
+If your final deploy model is already copied into the FINN build directory as `model.onnx`, point Step 5 at that file instead so the reference tensors are tied to the exact model used for deployment.
+
+Recommended practical use:
+
+- copy `input.npy` and `expected_output.npy` into the FINN build directory if you want FINN verification steps to use them
+- or feed `input.npy` to the board runtime and save the board result as a separate `.npy` file for comparison
+
+### 10. Compare board/runtime output against the reference
+
+After running the model on hardware or through the final runtime stack, save the returned tensor as `board_output.npy` and compare it with:
+
+```bash
+python step6_compare_deploy_output.py \
+  --expected verification_io/expected_output.npy \
+  --actual board_output.npy
+```
+
+The script reports:
+
+- max absolute error
+- mean absolute error
+- RMSE
+- relative RMSE
+- complex-domain RMSE
+- pass/fail against configurable `atol` / `rtol`
+
+This is the point where you can honestly say the deployed FPGA path has been functionally validated, rather than only synthesized and packaged.
 
 #### Practical warning for this project
 
