@@ -29,6 +29,11 @@ figures/
 *.pt
 *.onnx
 *.npz
+*.npy
+
+# Verification outputs
+verification_io/
+verification_io_*/
 
 # Local duplicate readme
 README
