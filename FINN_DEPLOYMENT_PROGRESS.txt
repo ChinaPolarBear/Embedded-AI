@@ -1,14 +1,22 @@
+Before Running finn, there are some setup problems:
+1.Proxy (Network) Configuration Issues
+  In previous FINN setups, one key issue was that the network proxy was not correctly configured. Lab machines often have restricted access to external networks, which prevents connections to services such as GitHub, Docker Hub, or download.docker.com. This leads to failures in commands like curl, apt update, or pulling Docker images. Moreover, even if the host machine has internet access, the proxy may not be properly passed into Docker or the container environment, causing FINN to fail when downloading dependencies during execution. Therefore, before running FINN, it is necessary to ensure that the HTTP/HTTPS proxy is correctly configured at all levels (host, Docker, and container), and that external connections work properly.
+
+2./tmp or Shared Directory Permission Issues
+  Another common issue is related to the use of /tmp as the default intermediate directory in FINN. In lab or Docker environments, this directory may have permission or sharing limitations. For example, the container may not have proper access rights to /tmp, or the directory may not be correctly shared between the host and the container. This can cause failures during the build process. To avoid this, it is recommended to define a user-owned directory such as ~/finn_tmp and set it using the FINN_BUILD_DIR environment variable. This ensures stable read/write permissions and avoids issues related to Docker volume sharing, making the FINN workflow more reliable.
+
+
 FINN Deployment Progress Log
-Date: 2026-04-18
+Date: 2026-04-19
 Project:
 - Embedded-AI
 - Target platform: Xilinx Alveo U250
 
 Current overall status:
 - Local model-side export flow has been brought to a runnable state.
-- FINN deployment flow progressed through QONNX export, FINN-ONNX conversion, and full dataflow compilation.
-- The full 19-step FINN build completed successfully in the FINN environment.
-- Later stages including bitfile synthesis, PYNQ driver generation, and deployment packaging were completed successfully.
+- FINN deployment flow has progressed through QONNX export and FINN-ONNX conversion.
+- build_dataflow has been attempted in the FINN environment.
+- The current blocking issue is at step_hw_ipgen because vitis_hls is not available in PATH inside the environment that runs build_dataflow.
 
 Completed steps so far:
 1. step1_export_trunk_matrices.py
@@ -33,10 +41,10 @@ Completed steps so far:
 - artifact produced: deeponet_u250_int8_qonnx_finn.onnx
 
 6. build_dataflow setup
-- my_build directory structure was prepared around:
+- my_build directory structure has been prepared conceptually around:
   - model.onnx
   - dataflow_build_config.json
-- output directories such as output_u250_estimate, output_u250_hw, and output_u250_bitfile were generated during the completed build flow.
+- output directories such as output_u250_estimate, output_u250_hw, and output_u250_bitfile are expected to be created under my_build/.
 
 Issues encountered during FINN build flow:
 
@@ -49,15 +57,16 @@ Issue A: step_specialize_layers
   using "fpga_part": "xcu250-figd2104-2L-e" works more reliably than using "board": "U250" in the current FINN environment
 
 Issue B: step_hw_ipgen
-- Error observed during earlier runs:
+- Current blocking error:
   AssertionError: vitis_hls not found in PATH
 - Traceback summary:
-  the flow reached HLSSynthIP(), then FINN tried to call vitis_hls for HLS IP generation, but the runtime environment did not initially have vitis_hls on PATH
+  the flow reaches HLSSynthIP(), then FINN tries to call vitis_hls for HLS IP generation, but the current runtime environment does not have vitis_hls on PATH
 - Important note:
-  vitis_hls was found at:
+  vitis_hls has been found at:
   /tools/Xilinx22_Full/Vitis_HLS/2022.2/bin/vitis_hls
-- Resolution:
-  the required Xilinx / HLS tool paths were exported in the same shell environment used to run build_dataflow, after which the build proceeded successfully through the remaining steps
+- Current interpretation:
+  the problem is not the JSON config itself
+  the problem is that the shell / container / environment executing build_dataflow does not have this path exported into PATH
 
 
 Challenges Encountered During Development and Solutions
@@ -77,8 +86,8 @@ Solution: Checked stitched IP interface mappings and ensured proper AXI / AXI-St
 During deployment to the Alveo U250 platform, incorrect platform paths or board configuration settings caused build errors.
 Solution: Verified the target platform configuration and ensured consistency between shell, board, and deployment settings.
 
--HLS toolchain environment configuration issue
-When the FINN flow reached the HLSSynthIP() stage, FINN attempted to call vitis_hls for HLS IP generation. Initially, the runtime environment did not have vitis_hls correctly configured in the system PATH.
+-HLS toolchain environment configuration issue (current main bottleneck)
+When the FINN flow reached the HLSSynthIP() stage, FINN attempted to call vitis_hls for HLS IP generation. However, the current runtime environment did not have vitis_hls correctly configured in the system PATH.
 Although the tool was detected at:
 /tools/Xilinx22_Full/Vitis_HLS/2022.2/bin/vitis_hls
 this path was not properly exported in the shell / container environment used to run build_dataflow.
@@ -87,8 +96,6 @@ Export /tools/Xilinx22_Full/Vitis_HLS/2022.2/bin into PATH in the same shell use
 Source the corresponding Xilinx environment setup scripts;
 Verify the setup using which vitis_hls;
 Rerun the FINN dataflow build.
-Result:
-The build then completed successfully through bitfile synthesis, PYNQ driver generation, and deployment packaging.
 
 -Step 16 resource pressure issue
 Resource utilization became a concern during synthesis and implementation, particularly for LUT, BRAM, and DSP usage.
@@ -97,10 +104,12 @@ Solution: Optimized quantization bit width, reduced parallelism, and adjusted fo
 -Step 17 unexpected EOF issue
 Build interruptions and script execution failures caused unexpected EOF errors during the later stages of the flow.
 Solution: Checked shell scripts, build logs, environment consistency, and available disk space.
-
--xclbin generation issue
+.xclbin generation issue
 The final FPGA bitstream packaging occasionally failed, preventing successful deployment.
 Solution: Investigated Vivado / Vitis build logs and verified platform, linker, and IP integration settings.
+
+-Step 18 and 19
+These final stages completed successfully and produced the expected deployment outputs, indicating that the FINN build flow was able to finish normally on the target platform.
 
 
 Current optional files status:
@@ -119,10 +128,14 @@ Impact of missing optional files:
   if verify_input_npy / verify_expected_output_npy are present in dataflow_build_config.json, then these files must exist
 
 Current recommended next action:
-1. Preserve the working FINN / Xilinx environment settings used for the successful 19-step run.
-2. Archive or document the final build logs and output directories for reporting and reproducibility.
-3. Add `input.npy` and `expected_output.npy` only if verification steps will be enabled in future FINN runs.
-4. If the flow is rerun on another machine, verify `which vitis_hls` in the same shell before starting build_dataflow.
+1. Ensure the exact shell that runs build_dataflow can resolve vitis_hls.
+2. In that same shell, export:
+   /tools/Xilinx22_Full/Vitis_HLS/2022.2/bin
+   into PATH before rerunning build_dataflow.
+3. If available, also source the corresponding Xilinx settings scripts for the installed toolchain.
+4. Rerun build_dataflow after confirming:
+   which vitis_hls
+   returns the correct path.
 
 Useful checkpoint artifacts already produced:
 - trunk_matrices.npz
@@ -134,5 +147,4 @@ Personal reminder:
 - The deployment flow has already passed the raw QONNX export stage.
 - The deployment flow has already passed the FINN-ready QONNX stage.
 - The deployment flow has already passed FINN-ONNX conversion.
-- The full 19-step FINN dataflow build has now completed successfully.
-- The remaining documentation should describe this as a completed build, not as a blocked flow.
+- The current blocker is in hardware IP generation environment setup, not in the earlier model export logic.
