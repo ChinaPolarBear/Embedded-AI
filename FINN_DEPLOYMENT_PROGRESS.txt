@@ -1,5 +1,13 @@
+Before Running finn, there are some setup problems:
+1.Proxy (Network) Configuration Issues
+  In previous FINN setups, one key issue was that the network proxy was not correctly configured. Lab machines often have restricted access to external networks, which prevents connections to services such as GitHub, Docker Hub, or download.docker.com. This leads to failures in commands like curl, apt update, or pulling Docker images. Moreover, even if the host machine has internet access, the proxy may not be properly passed into Docker or the container environment, causing FINN to fail when downloading dependencies during execution. Therefore, before running FINN, it is necessary to ensure that the HTTP/HTTPS proxy is correctly configured at all levels (host, Docker, and container), and that external connections work properly.
+
+2./tmp or Shared Directory Permission Issues
+  Another common issue is related to the use of /tmp as the default intermediate directory in FINN. In lab or Docker environments, this directory may have permission or sharing limitations. For example, the container may not have proper access rights to /tmp, or the directory may not be correctly shared between the host and the container. This can cause failures during the build process. To avoid this, it is recommended to define a user-owned directory such as ~/finn_tmp and set it using the FINN_BUILD_DIR environment variable. This ensures stable read/write permissions and avoids issues related to Docker volume sharing, making the FINN workflow more reliable.
+
+
 FINN Deployment Progress Log
-Date: 2026-04-13
+Date: 2026-04-19
 Project:
 - Embedded-AI
 - Target platform: Xilinx Alveo U250
@@ -99,6 +107,9 @@ Solution: Checked shell scripts, build logs, environment consistency, and availa
 .xclbin generation issue
 The final FPGA bitstream packaging occasionally failed, preventing successful deployment.
 Solution: Investigated Vivado / Vitis build logs and verified platform, linker, and IP integration settings.
+
+-Step 18 and 19
+These final stages completed successfully and produced the expected deployment outputs, indicating that the FINN build flow was able to finish normally on the target platform.
 
 
 Current optional files status:
