@@ -459,11 +459,11 @@ Important:
 
 This is the missing step if you want to prove that deployed inference matches the exported model, instead of only proving that the FINN build completed.
 
-Run this inside an environment that has `qonnx`, for example `.venv_finn` or the FINN environment:
+Run this inside an environment that has `qonnx`, for example `.venv_finn` or the FINN environment. In the recommended step-by-step deployment flow, do this after the final FINN deploy model has been copied into the build directory as `model.onnx`:
 
 ```bash
 python step5_generate_verification_io.py \
-  --model deeponet_u250_int8_qonnx_ready.onnx \
+  --model /home/oband/finn/my_build/model.onnx \
   --out_dir verification_io
 ```
 
@@ -473,12 +473,13 @@ This will generate:
 - `verification_io/expected_output.npy`
 - `verification_io/verification_case.npz`
 
-If your final deploy model is already copied into the FINN build directory as `model.onnx`, point Step 5 at that file instead so the reference tensors are tied to the exact model used for deployment.
+This is the safer choice for deployment verification because the saved reference tensors are generated from the exact model file that FINN uses for deployment, not from an earlier intermediate export.
 
 Recommended practical use:
 
 - copy `input.npy` and `expected_output.npy` into the FINN build directory if you want FINN verification steps to use them
 - or feed `input.npy` to the board runtime and save the board result as a separate `.npy` file for comparison
+- if you have not copied the final deploy model into `my_build/model.onnx` yet, you can still point `--model` at `deeponet_u250_int8_qonnx_ready.onnx`, but the deployed-model path above is the recommended workflow
 
 ### 10. Compare board/runtime output against the reference
 
