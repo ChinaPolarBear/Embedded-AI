@@ -1,22 +1,27 @@
 """
-Step 5: Generate verification input/output tensors for FINN or board-side checking.
+Step 5: Generate one board-side verification case using an SSFM reference.
 
 Typical usage:
     python step5_generate_verification_io.py \
-        --model deeponet_u250_int8_qonnx_ready.onnx \
-        --out_dir verification_io
+        --out_dir verification_io \
+        --source random \
+        --seed 123
 
 This script:
-  1) Builds one deploy input waveform from the existing project data path.
+  1) Selects one waveform sample from the existing project data path.
   2) Converts it into the deploy-model branch input `u_in`.
-  3) Executes the exported QONNX / FINN-ready model with qonnx.
+  3) Uses SSFM to obtain the clean reference output at z=L.
   4) Saves:
        - input.npy
-       - expected_output.npy
+       - ssfm_output.npy
        - verification_case.npz
 
-Run this inside an environment that has qonnx installed, for example `.venv_finn`.
+Notes:
+  - `input.npy` is the float32 branch input expected by the exported deploy model.
+  - If your board runtime later expects a quantized/raw format, keep this script as the
+    source of truth for the waveform and add the board-specific conversion in the host code.
 """
+# python step5_generate_verification_io.py --out_dir verification_io --source random --seed 123
 
 from __future__ import annotations
 
@@ -27,16 +32,13 @@ import numpy as np
 import torch
 
 import pinn_physics_model as pm
-from finn_qonnx_utils import prepare_qonnx_for_finn
 
-try:
-    from qonnx.core.modelwrapper import ModelWrapper
-    from qonnx.core.onnx_exec import execute_onnx
-except ImportError as exc:  # pragma: no cover - handled with a clear runtime error
-    raise RuntimeError(
-        "qonnx is required for step5_generate_verification_io.py. "
-        "Run this script inside the FINN / .venv_finn environment."
-    ) from exc
+
+def _set_seed(seed: int | None) -> None:
+    if seed is None:
+        return
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
 
 def _select_sample(source: str, sample_index: int) -> tuple[torch.Tensor, torch.Tensor, str]:
@@ -103,152 +105,69 @@ def _select_sample(source: str, sample_index: int) -> tuple[torch.Tensor, torch.
     raise ValueError(f"Unsupported source: {source}")
 
 
-def _get_model_io_names(model: ModelWrapper) -> tuple[str, str]:
-    initializer_names = {init.name for init in model.graph.initializer}
-    graph_inputs = [value.name for value in model.graph.input if value.name not in initializer_names]
-    input_name = graph_inputs[0] if graph_inputs else model.graph.input[0].name
-    output_name = model.graph.output[0].name
-    return input_name, output_name
+def _complex_to_two_channel(x: torch.Tensor) -> np.ndarray:
+    x_np = x.detach().cpu().numpy()
+    return np.stack([x_np.real.astype(np.float32), x_np.imag.astype(np.float32)], axis=0)
 
 
-def _load_executable_model(model_path: Path, prepared_model_path: Path | None) -> tuple[ModelWrapper, Path]:
-    model = ModelWrapper(str(model_path))
-
-    # Raw QONNX exports may still need shape/datatype cleanup before qonnx execution.
-    try:
-        _get_model_io_names(model)
-        return model, model_path
-    except Exception:
-        pass
-
-    if prepared_model_path is None:
-        prepared_model_path = model_path.with_name(model_path.stem + "_ready.onnx")
-
-    prepared = prepare_qonnx_for_finn(
-        in_path=str(model_path),
-        out_path=str(prepared_model_path),
-        verbose=False,
-    )
-    return prepared, prepared_model_path
-
-
-def _execute_model(model_path: Path, u_in: np.ndarray, prepared_model_path: Path | None) -> tuple[np.ndarray, str, str, Path]:
-    model, resolved_model_path = _load_executable_model(model_path, prepared_model_path)
-    input_name, output_name = _get_model_io_names(model)
-
-    try:
-        outputs = execute_onnx(model, {input_name: u_in})
-    except Exception as exc:
-        message = str(exc)
-        if "infer_shapes" not in message:
-            raise
-        if prepared_model_path is None:
-            prepared_model_path = model_path.with_name(model_path.stem + "_ready.onnx")
-        model = prepare_qonnx_for_finn(
-            in_path=str(model_path),
-            out_path=str(prepared_model_path),
-            verbose=False,
-        )
-        resolved_model_path = prepared_model_path
-        input_name, output_name = _get_model_io_names(model)
-        outputs = execute_onnx(model, {input_name: u_in})
-
-    y = outputs[output_name]
-    return np.asarray(y, dtype=np.float32), input_name, output_name, resolved_model_path
-
-
-def _to_numpy_complex(x: torch.Tensor) -> np.ndarray:
-    return x.detach().cpu().numpy()
-
-
-def main(
-    model: str,
-    out_dir: str,
-    source: str,
-    sample_index: int,
-    prepared_model_out: str | None,
-) -> None:
-    model_path = Path(model).resolve()
-    if not model_path.is_file():
-        raise FileNotFoundError(f"Model file not found: {model_path}")
+def main(out_dir: str, source: str, sample_index: int, seed: int | None) -> None:
+    _set_seed(seed)
 
     out_dir_path = Path(out_dir).resolve()
     out_dir_path.mkdir(parents=True, exist_ok=True)
 
-    prepared_model_path = Path(prepared_model_out).resolve() if prepared_model_out else None
-
     A0, AL_clean, source_desc = _select_sample(source, sample_index)
+
     with torch.no_grad():
         u_in_t = pm.make_branch_input(A0.unsqueeze(0)).float()
+
     u_in = u_in_t.detach().cpu().numpy().astype(np.float32)
+    ssfm_output = _complex_to_two_channel(AL_clean)[None, :, :]
+    t_grid = pm.t_grid.detach().cpu().numpy().astype(np.float32)
 
-    expected_output, input_name, output_name, resolved_model_path = _execute_model(
-        model_path=model_path,
-        u_in=u_in,
-        prepared_model_path=prepared_model_path,
-    )
-
-    if expected_output.ndim != 3 or expected_output.shape[1] != 2:
-        raise ValueError(
-            "Expected deploy output shape [B, 2, N_t], "
-            f"but got {expected_output.shape} from {resolved_model_path}"
-        )
-
-    ref_clean = np.stack(
-        [
-            _to_numpy_complex(AL_clean).real.astype(np.float32),
-            _to_numpy_complex(AL_clean).imag.astype(np.float32),
-        ],
-        axis=0,
-    )[None, :, :]
-
-    deploy_rmse_vs_clean = float(np.sqrt(np.mean((expected_output - ref_clean) ** 2)))
-    deploy_rel_rmse_vs_clean = float(
-        deploy_rmse_vs_clean / (np.sqrt(np.mean(ref_clean**2)) + 1e-12)
-    )
-
-    np.save(out_dir_path / "input.npy", u_in.astype(np.float32))
-    np.save(out_dir_path / "expected_output.npy", expected_output.astype(np.float32))
+    np.save(out_dir_path / "input.npy", u_in)
+    np.save(out_dir_path / "ssfm_output.npy", ssfm_output)
     np.savez(
         out_dir_path / "verification_case.npz",
-        model_path=np.array([str(resolved_model_path)]),
         source=np.array([source_desc]),
-        model_input_name=np.array([input_name]),
-        model_output_name=np.array([output_name]),
-        u_in=u_in.astype(np.float32),
-        expected_output=expected_output.astype(np.float32),
-        A0_real=_to_numpy_complex(A0).real.astype(np.float32),
-        A0_imag=_to_numpy_complex(A0).imag.astype(np.float32),
-        AL_clean_real=_to_numpy_complex(AL_clean).real.astype(np.float32),
-        AL_clean_imag=_to_numpy_complex(AL_clean).imag.astype(np.float32),
+        sample_index=np.array([sample_index], dtype=np.int32),
+        seed=np.array([-1 if seed is None else seed], dtype=np.int64),
+        input_format=np.array(["branch_input_real_imag_float32"]),
+        output_format=np.array(["two_channel_real_imag_float32"]),
+        t_grid=t_grid,
+        propagation_distance=np.array([pm.L], dtype=np.float32),
+        u_in=u_in,
+        ssfm_output=ssfm_output,
+        A0_real=A0.real.detach().cpu().numpy().astype(np.float32),
+        A0_imag=A0.imag.detach().cpu().numpy().astype(np.float32),
+        AL_clean_real=AL_clean.real.detach().cpu().numpy().astype(np.float32),
+        AL_clean_imag=AL_clean.imag.detach().cpu().numpy().astype(np.float32),
     )
 
     print(f"[OK] Generated verification tensors in: {out_dir_path}")
-    print(f"     model used: {resolved_model_path}")
-    print(f"     source    : {source_desc}")
-    print(f"     input     : {input_name} shape={tuple(u_in.shape)} dtype={u_in.dtype}")
-    print(f"     output    : {output_name} shape={tuple(expected_output.shape)} dtype={expected_output.dtype}")
-    print(f"     deploy vs SSFM clean RMSE      = {deploy_rmse_vs_clean:.6e}")
-    print(f"     deploy vs SSFM clean rel. RMSE = {deploy_rel_rmse_vs_clean:.6e}")
+    print(f"     source        : {source_desc}")
+    print(f"     seed          : {seed if seed is not None else 'none'}")
+    print(f"     input.npy     : shape={tuple(u_in.shape)} dtype={u_in.dtype}")
+    print(f"     ssfm_output   : shape={tuple(ssfm_output.shape)} dtype={ssfm_output.dtype}")
+    print("     note          : input.npy is float32 deploy input; board-specific raw quantization")
+    print("                     should be added later in the board host/runtime layer.")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", type=str, default="deeponet_u250_int8_qonnx_ready.onnx")
     ap.add_argument("--out_dir", type=str, default="verification_io")
-    ap.add_argument("--source", type=str, choices=["train", "test", "random"], default="test")
+    ap.add_argument("--source", type=str, choices=["train", "test", "random"], default="random")
     ap.add_argument("--sample_index", type=int, default=0)
     ap.add_argument(
-        "--prepared_model_out",
-        type=str,
+        "--seed",
+        type=int,
         default=None,
-        help="Optional path for an auto-generated _ready model when the input model needs cleanup first.",
+        help="Optional random seed. Only affects --source random.",
     )
     args = ap.parse_args()
     main(
-        model=args.model,
         out_dir=args.out_dir,
         source=args.source,
         sample_index=args.sample_index,
-        prepared_model_out=args.prepared_model_out,
+        seed=args.seed,
     )

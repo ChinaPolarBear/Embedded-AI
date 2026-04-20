@@ -66,10 +66,10 @@ The current repository includes:
   Runs the same preparation flow and then calls `ConvertQONNXtoFINN()` to generate FINN-ONNX.
 
 - `step5_generate_verification_io.py`
-  Generates `input.npy` and `expected_output.npy` from the exported deploy model so FINN verification and board-side checking use the same reference tensors.
+  Generates one verification case for board-side checking: `input.npy` for the deploy branch input, `ssfm_output.npy` as the clean SSFM reference, and `verification_case.npz` with the full sample metadata.
 
 - `step6_compare_deploy_output.py`
-  Compares actual runtime / board output against `expected_output.npy` and reports max error, RMSE, relative RMSE, and pass/fail against tolerances.
+  Compares decoded runtime / board output against the saved SSFM reference, reports error metrics, and saves comparison figures.
 
 - `finn_qonnx_utils.py`
   Shared helpers for QONNX export compatibility, graph cleanup, shape/datatype inference, and `Gemm` / `MatMul` validation.
@@ -91,8 +91,11 @@ The current repository includes:
 - `verification_io/input.npy`
   Deploy-model input tensor that can be copied into the FINN build directory or used for board-side testing.
 
-- `verification_io/expected_output.npy`
-  Reference deploy-model output tensor paired with `input.npy`.
+- `verification_io/ssfm_output.npy`
+  Clean SSFM reference output paired with `input.npy`.
+
+- `verification_io/verification_case.npz`
+  Full verification bundle containing the waveform, branch input, SSFM reference output, and metadata such as `t_grid`.
 
 - `deeponet_u250_int8_qonnx_finn.onnx`
   FINN-ONNX model produced by Step 4.2 by default.
@@ -303,7 +306,6 @@ FINN simple dataflow mode expects a dedicated build directory containing:
 - `dataflow_build_config.json`
 - optionally `folding_config.json`
 - optionally `specialize_layers_config.json`
-- optionally verification files such as `input.npy` and `expected_output.npy`
 
 Example directory layout:
 
@@ -313,8 +315,6 @@ my_build/
   dataflow_build_config.json
   folding_config.json                 # optional
   specialize_layers_config.json       # optional
-  input.npy                           # optional, for verification
-  expected_output.npy                 # optional, for verification
 ```
 
 Copy the FINN-ONNX model and rename it exactly to `model.onnx`:
@@ -451,43 +451,42 @@ FINN will place outputs under the `output_dir` specified in the JSON config. The
 
 Important:
 
-- if you do not have `input.npy` and `expected_output.npy`, do not include `verify_steps`
+- if you are not using FINN's own deploy-model `verify_steps`, do not include `verify_steps`
 - also remove `verify_input_npy` and `verify_expected_output_npy` from `dataflow_build_config.json`
 - otherwise the build can fail simply because those files do not exist yet
 
 ### 9. Generate verification input/output
 
-This is the missing step if you want to prove that deployed inference matches the exported model, instead of only proving that the FINN build completed.
+This is the missing step if you want a board-side validation case that starts from one known waveform, exports the matching deploy input, and keeps an SSFM reference for later comparison.
 
-Run this inside an environment that has `qonnx`, for example `.venv_finn` or the FINN environment. In the recommended step-by-step deployment flow, do this after the final FINN deploy model has been copied into the build directory as `model.onnx`:
+This step only needs the normal local Python environment. It does not execute the exported ONNX model and does not require `qonnx`.
 
 ```bash
 python step5_generate_verification_io.py \
-  --model /home/xband/finn/my_build/model.onnx \
-  --out_dir verification_io
+  --out_dir verification_io \
+  --source random \
+  --seed 123
 ```
 
 This will generate:
 
 - `verification_io/input.npy`
-- `verification_io/expected_output.npy`
+- `verification_io/ssfm_output.npy`
 - `verification_io/verification_case.npz`
-
-This is the safer choice for deployment verification because the saved reference tensors are generated from the exact model file that FINN uses for deployment, not from an earlier intermediate export.
 
 Recommended practical use:
 
-- copy `input.npy` and `expected_output.npy` into the FINN build directory if you want FINN verification steps to use them
-- or feed `input.npy` to the board runtime and save the board result as a separate `.npy` file for comparison
-- if you have not copied the final deploy model into `my_build/model.onnx` yet, you can still point `--model` at `deeponet_u250_int8_qonnx_ready.onnx`, but the deployed-model path above is the recommended workflow
+- feed `input.npy` to the board/runtime path as the deploy-model branch input
+- keep `ssfm_output.npy` and `verification_case.npz` on the host side as the clean reference bundle
+- if the board host later requires a quantized/raw input representation, add that board-specific conversion in the host/runtime layer rather than changing the reference case generation
 
 ### 10. Compare board/runtime output against the reference
 
-After running the model on hardware or through the final runtime stack, save the returned tensor as `board_output.npy` and compare it with:
+After running the model on hardware or through the final runtime stack, save the decoded returned tensor as `board_output.npy` and compare it with:
 
 ```bash
 python step6_compare_deploy_output.py \
-  --expected verification_io/expected_output.npy \
+  --case verification_io/verification_case.npz \
   --actual board_output.npy
 ```
 
@@ -498,9 +497,16 @@ The script reports:
 - RMSE
 - relative RMSE
 - complex-domain RMSE
+- amplitude-domain MAE / RMSE
 - pass/fail against configurable `atol` / `rtol`
+- and it also saves amplitude, constellation, and error-summary figures
 
-This is the point where you can honestly say the deployed FPGA path has been functionally validated, rather than only synthesized and packaged.
+Important:
+
+- `board_output.npy` must already be decoded into `[B,2,N_t]`, `[B,N_t,2]`, `[2,N_t]`, `[N_t,2]`, or complex waveform form
+- raw board-specific integer dumps such as `(1, 256) int32` are not self-describing enough for this script and must be decoded first by the board host code
+
+This is the point where you can honestly say the deployed FPGA path has been functionally checked against the SSFM reference, rather than only synthesized and packaged.
 
 #### Practical warning for this project
 
