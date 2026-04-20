@@ -320,8 +320,8 @@ my_build/
 Copy the FINN-ONNX model and rename it exactly to `model.onnx`:
 
 ```bash
-cd /home/oband/finn/qonnx_models_new
-cp deeponet_u250_int8_qonnx_finn.onnx /home/oband/finn/my_build/model.onnx
+cd /home/xband/finn/qonnx_models_new
+cp deeponet_u250_int8_qonnx_finn.onnx /home/xband/finn/my_build/model.onnx
 
 ```
 
@@ -363,8 +363,8 @@ Notes:
 - the exports must be done before calling `./run-docker.sh build_dataflow ...`
 
 ```bash
-cd /home/oband/finn
-./run-docker.sh build_dataflow /home/oband/finn/my_build
+cd /home/xband/finn
+./run-docker.sh build_dataflow /home/xband/finn/my_build
 ```
 
 #### How to edit `dataflow_build_config.json` in terminal
@@ -372,7 +372,7 @@ cd /home/oband/finn
 Open the config file inside `my_build`:
 
 ```bash
-cd /home/oband/finn/my_build
+cd /home/xband/finn/my_build
 nano dataflow_build_config.json
 ```
 
@@ -409,8 +409,8 @@ Then run the build from the FINN root directory:
 ```
 
 ```bash
-cd /home/oband/finn
-./run-docker.sh build_dataflow /home/oband/finn/my_build
+cd /home/xband/finn
+./run-docker.sh build_dataflow /home/xband/finn/my_build
 ```
 
 Important:
@@ -431,8 +431,8 @@ export HLS_PATH=/tools/Xilinx22_Full/Vitis_HLS/2022.2
 export VIVADO_PATH=/tools/Xilinx22_Full/Vivado/2022.2
 export VITIS_PATH=/tools/Xilinx22_Full/Vitis/2022.2
 export PLATFORM_REPO_PATHS=/tools/Xilinx22_Full/platforms
-cd /home/oband/finn
-./run-docker.sh build_dataflow /home/oband/finn/my_build
+cd /home/xband/finn
+./run-docker.sh build_dataflow /home/xband/finn/my_build
 ```
 
 #### Outputs to inspect after `build_dataflow`
@@ -463,7 +463,7 @@ Run this inside an environment that has `qonnx`, for example `.venv_finn` or the
 
 ```bash
 python step5_generate_verification_io.py \
-  --model /home/oband/finn/my_build/model.onnx \
+  --model /home/xband/finn/my_build/model.onnx \
   --out_dir verification_io
 ```
 
