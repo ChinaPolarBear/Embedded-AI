@@ -1,4 +1,5 @@
 # python step4.1_export_QONNX_ready_model.py --qonnx_in deeponet_u250_int8_qonnx.onnx
+# python step4.1_export_QONNX_ready_model.py --qonnx_in deeponet_u250_int4_qonnx.onnx --qonnx_ready_out deeponet_u250_int4_qonnx_ready.onnx
 
 import argparse
 

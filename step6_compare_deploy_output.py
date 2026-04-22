@@ -46,7 +46,9 @@ def _normalize_output(arr: np.ndarray, name: str, expected_n_t: int | None = Non
         ):
             raise ValueError(
                 f"{name} looks like a raw integer board dump with shape {arr.shape} and dtype {arr.dtype}. "
-                "Decode/dequantize it into [B,2,N_t] float/complex form before running this script."
+                "Decode/dequantize it into [B,2,N_t] float/complex form before running this script. "
+                "If your current bitfile really exposes a single-output (1,256) interface, use "
+                "`step6_probe_single_output_semantics.py` instead."
             )
 
     arr = arr.astype(np.float32, copy=False)
