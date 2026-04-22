@@ -31,9 +31,6 @@ The current repository includes:
 - `pinn_physics_model.py`
   Main physics-driven DeepONet training script.
 
-- `pinn_physics_model_demo.py`
-  Demo-style variant of the same overall model and training idea.
-
 ### Data generation and evaluation
 
 - `SSFM_Data_Generation.py`
@@ -351,13 +348,17 @@ Inside the FINN environment, the practical workflow used in this project is:
 Before running `run-docker.sh`, export the Xilinx-related environment variables in the same shell on the host side:
 
 ```bash
-export FINN_XILINX_PATH=/tools/Xilinx22_Full
+export FINN_XILINX_PATH=/opt/Xilinx
 export FINN_XILINX_VERSION=2022.2
-export HLS_PATH=/tools/Xilinx22_Full/Vitis_HLS/2022.2
-export VIVADO_PATH=/tools/Xilinx22_Full/Vivado/2022.2
-export VITIS_PATH=/tools/Xilinx22_Full/Vitis/2022.2
+export VIVADO_PATH=/opt/Xilinx/Vivado/2022.2
+export VITIS_PATH=/opt/Xilinx/Vitis/2022.2
+export HLS_PATH=/opt/Xilinx/Vitis_HLS/2022.2
 export PLATFORM_REPO_PATHS=/opt/xilinx/platforms
 #export NUM_DEFAULT_WORKERS=1 (add it if the system is shutted down)
+
+source /opt/Xilinx/Vivado/2022.2/settings64.sh
+source /opt/Xilinx/Vitis/2022.2/settings64.sh
+source /opt/Xilinx/Vitis_HLS/2022.2/settings64.sh
 ```
 
 Then check them:
@@ -370,18 +371,25 @@ echo $VIVADO_PATH
 echo $VITIS_PATH
 echo $PLATFORM_REPO_PATHS
 ls $HLS_PATH
-find /tools/Xilinx22_Full -name "*.xpfm" | head
+find /opt/Xilinx -name "*.xpfm" | head
 ```
 
 Notes:
 
 - `PLATFORM_REPO_PATHS` must point to the directory that contains the Vitis platform files for your Alveo target
-- if `/tools/Xilinx22_Full/platforms` does not exist on your machine, use `find /tools/Xilinx22_Full -name "*.xpfm"` first and then set `PLATFORM_REPO_PATHS` to the directory that contains the relevant U250 platform files
-- if you do not have separate `Vitis` or `Vivado` directories in your installation, adjust `VITIS_PATH` and `VIVADO_PATH` to match your actual tool installation layout
+- if `/opt/xilinx/platforms` does not exist on your machine, use `find /opt/Xilinx -name "*.xpfm"` first and then set `PLATFORM_REPO_PATHS` to the directory that contains the relevant U250 platform files
+- after exporting the variables, also run the three `source .../settings64.sh` commands in the same shell so Vivado, Vitis, and Vitis HLS are fully loaded
 - the exports must be done before calling `./run-docker.sh build_dataflow ...`
 
 ```bash
 cd /home/xband/finn
+mkdir -p /home/xband/finn_tmp
+unset FINN_BUILD_DIR
+unset FINN_HOST_BUILD_DIR
+export FINN_BUILD_DIR=/home/xband/finn_tmp
+export FINN_HOST_BUILD_DIR=/home/xband/finn_tmp
+echo $FINN_BUILD_DIR
+echo $FINN_HOST_BUILD_DIR
 ./run-docker.sh build_dataflow /home/xband/finn/my_build
 ```
 
@@ -414,9 +422,11 @@ Then run the build from the FINN root directory:
   "synth_clk_period_ns": 5.0,
   "fpga_part": "xcu250-figd2104-2L-e",
   "shell_flow_type": "vitis_alveo",
+  "vitis_platform": "xilinx_u250_gen3x16_xdma_4_1_202210_1",
   "generate_outputs": [
     "estimate_reports",
     "stitched_ip",
+    "rtlsim_performance",
     "out_of_context_synth",
     "bitfile",
     "pynq_driver",
@@ -424,10 +434,18 @@ Then run the build from the FINN root directory:
   ],
   "save_intermediate_models": true
 }
+
 ```
 
 ```bash
 cd /home/xband/finn
+mkdir -p /home/xband/finn_tmp
+unset FINN_BUILD_DIR
+unset FINN_HOST_BUILD_DIR
+export FINN_BUILD_DIR=/home/xband/finn_tmp
+export FINN_HOST_BUILD_DIR=/home/xband/finn_tmp
+echo $FINN_BUILD_DIR
+echo $FINN_HOST_BUILD_DIR
 ./run-docker.sh build_dataflow /home/xband/finn/my_build
 ```
 
@@ -443,13 +461,23 @@ For this project and FINN setup, using `"fpga_part": "xcu250-figd2104-2L-e"` is 
 If `vitis_hls` is not found, export the tool variables again in the same shell before rerunning:
 
 ```bash
-export FINN_XILINX_PATH=/tools/Xilinx22_Full
+export FINN_XILINX_PATH=/opt/Xilinx
 export FINN_XILINX_VERSION=2022.2
-export HLS_PATH=/tools/Xilinx22_Full/Vitis_HLS/2022.2
-export VIVADO_PATH=/tools/Xilinx22_Full/Vivado/2022.2
-export VITIS_PATH=/tools/Xilinx22_Full/Vitis/2022.2
-export PLATFORM_REPO_PATHS=/tools/Xilinx22_Full/platforms
+export VIVADO_PATH=/opt/Xilinx/Vivado/2022.2
+export VITIS_PATH=/opt/Xilinx/Vitis/2022.2
+export HLS_PATH=/opt/Xilinx/Vitis_HLS/2022.2
+export PLATFORM_REPO_PATHS=/opt/xilinx/platforms
+source /opt/Xilinx/Vivado/2022.2/settings64.sh
+source /opt/Xilinx/Vitis/2022.2/settings64.sh
+source /opt/Xilinx/Vitis_HLS/2022.2/settings64.sh
 cd /home/xband/finn
+mkdir -p /home/xband/finn_tmp
+unset FINN_BUILD_DIR
+unset FINN_HOST_BUILD_DIR
+export FINN_BUILD_DIR=/home/xband/finn_tmp
+export FINN_HOST_BUILD_DIR=/home/xband/finn_tmp
+echo $FINN_BUILD_DIR
+echo $FINN_HOST_BUILD_DIR
 ./run-docker.sh build_dataflow /home/xband/finn/my_build
 ```
 
