@@ -9,8 +9,10 @@ Typical usage:
 Expected `board_output.npy` formats:
   - [B, 2, N_t]
   - [B, N_t, 2]
+  - [B, 2*N_t] with real first, imag second
   - [2, N_t]
   - [N_t, 2]
+  - [2*N_t] with real first, imag second
   - complex [N_t]
   - complex [B, N_t]
 
@@ -43,10 +45,14 @@ def _normalize_output(arr: np.ndarray, name: str, expected_n_t: int | None = Non
     if np.issubdtype(arr.dtype, np.integer) and expected_n_t is not None:
         if (arr.ndim == 1 and arr.shape[0] == expected_n_t) or (
             arr.ndim == 2 and arr.shape[-1] == expected_n_t and arr.shape[0] != 2
+        ) or (
+            arr.ndim == 1 and arr.shape[0] == 2 * expected_n_t
+        ) or (
+            arr.ndim == 2 and arr.shape[-1] == 2 * expected_n_t
         ):
             raise ValueError(
                 f"{name} looks like a raw integer board dump with shape {arr.shape} and dtype {arr.dtype}. "
-                "Decode/dequantize it into [B,2,N_t] float/complex form before running this script. "
+                "Decode/dequantize it into [B,2,N_t], [B,2*N_t] float, or complex form before running this script. "
                 "If your current bitfile really exposes a single-output (1,256) interface, use "
                 "`step6_probe_single_output_semantics.py` instead."
             )
@@ -57,14 +63,18 @@ def _normalize_output(arr: np.ndarray, name: str, expected_n_t: int | None = Non
         return arr
     if arr.ndim == 3 and arr.shape[2] == 2:
         return np.transpose(arr, (0, 2, 1))
+    if expected_n_t is not None and arr.ndim == 2 and arr.shape[1] == 2 * expected_n_t:
+        return arr.reshape(arr.shape[0], 2, expected_n_t)
+    if expected_n_t is not None and arr.ndim == 1 and arr.shape[0] == 2 * expected_n_t:
+        return arr.reshape(1, 2, expected_n_t)
     if arr.ndim == 2 and arr.shape[0] == 2:
         return arr[None, :, :]
     if arr.ndim == 2 and arr.shape[1] == 2:
         return np.transpose(arr[None, :, :], (0, 2, 1))
 
     raise ValueError(
-        f"{name} must have shape [B,2,N_t], [B,N_t,2], [2,N_t], [N_t,2], "
-        f"complex [N_t], or complex [B,N_t], but got {arr.shape}"
+        f"{name} must have shape [B,2,N_t], [B,N_t,2], [B,2*N_t], [2,N_t], [N_t,2], "
+        f"[2*N_t], complex [N_t], or complex [B,N_t], but got {arr.shape}"
     )
 
 

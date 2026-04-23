@@ -91,6 +91,9 @@ The current repository includes:
 - `verification_io/ssfm_output.npy`
   Clean SSFM reference output paired with `input.npy`.
 
+- `verification_io/ssfm_output_flat.npy`
+  Flattened clean SSFM reference with shape `[1,512]`: first 256 values are real, last 256 values are imag.
+
 - `verification_io/verification_case.npz`
   Full verification bundle containing the waveform, branch input, SSFM reference output, and metadata such as `t_grid`.
 
@@ -226,6 +229,7 @@ What Step 3 now does:
 - uses signed int4 input quantization
 - uses unsigned int4 quantized `ReLU` activations
 - can explicitly quantize the final output tensor to signed int4
+- exports the deploy output as flattened `[B, 512]`, where the first 256 values are real and the last 256 values are imag
 
 ### 6. Prepare FINN-ready QONNX
 
@@ -334,16 +338,14 @@ my_build/
 
 Copy the FINN-ONNX model and rename it exactly to `model.onnx`:
 
-```bash
-cd /home/xband/finn/qonnx_models_new
-cp deeponet_u250_int4_qonnx_finn.onnx /home/xband/finn/my_build/model.onnx
-
-```
-
 #### Minimal terminal workflow
 
 运行的时候确保是在finn/my_build的路径下运行，尤其是修改json文件内容的时候
 Inside the FINN environment, the practical workflow used in this project is:
+
+```bash
+cd /home/xband/finn/my_build
+```
 
 Before running `run-docker.sh`, export the Xilinx-related environment variables in the same shell on the host side:
 
@@ -382,14 +384,19 @@ Notes:
 - the exports must be done before calling `./run-docker.sh build_dataflow ...`
 
 ```bash
-cd /home/xband/finn
-mkdir -p /home/xband/finn_tmp
+cd ~/finn
+
+mkdir -p ~/finn_tmp
+
 unset FINN_BUILD_DIR
 unset FINN_HOST_BUILD_DIR
+
 export FINN_BUILD_DIR=/home/xband/finn_tmp
 export FINN_HOST_BUILD_DIR=/home/xband/finn_tmp
+
 echo $FINN_BUILD_DIR
 echo $FINN_HOST_BUILD_DIR
+
 ./run-docker.sh build_dataflow /home/xband/finn/my_build
 ```
 
@@ -518,6 +525,7 @@ This will generate:
 
 - `verification_io/input.npy`
 - `verification_io/ssfm_output.npy`
+- `verification_io/ssfm_output_flat.npy`
 - `verification_io/verification_case.npz`
 
 Recommended practical use:
@@ -549,7 +557,8 @@ The script reports:
 
 Important:
 
-- `board_output.npy` must already be decoded into `[B,2,N_t]`, `[B,N_t,2]`, `[2,N_t]`, `[N_t,2]`, or complex waveform form
+- `board_output.npy` must already be decoded into `[B,2,N_t]`, `[B,N_t,2]`, flattened `[B,2*N_t]`, `[2,N_t]`, `[N_t,2]`, flattened `[2*N_t]`, or complex waveform form
+- for the current flattened deploy output, use `[1,512]`: `output[0,0:256]` is real and `output[0,256:512]` is imag
 - raw board-specific integer dumps such as `(1, 256) int32` are not self-describing enough for this script and must be decoded first by the board host code
 
 This is the point where you can honestly say the deployed FPGA path has been functionally checked against the SSFM reference, rather than only synthesized and packaged.

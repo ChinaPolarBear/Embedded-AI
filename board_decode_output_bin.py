@@ -1,19 +1,20 @@
 """
-Decode the current board-facing INT24 single-output `output.bin`.
+Decode the current board-facing single-output `output.bin`.
 
 This helper targets the deploy package interface we observed in the generated driver:
-  - output normal shape: (1, 256)
-  - output datatype    : INT24
+  - output normal shape: (1, 512) for the flattened real/imag build
+  - output datatype    : usually INT16 for the current low-bit build
 
 Typical usage:
     python board_decode_output_bin.py ^
         --input_bin output.bin ^
-        --out_npy output_1x256_raw.npy
+        --out_npy output_1x512_raw.npy ^
+        --length 512 ^
+        --datatype INT16
 
 Supported raw sizes:
-  - 768 bytes  : one INT24 output trace, exactly matching the current driver metadata
-  - 1536 bytes : two packed halves, where one half may be all-zero because the host code
-                 was still assuming a historical (1, 2, 256) layout
+  - length * datatype_bytes      : one output trace, exactly matching the current driver metadata
+  - 2 * length * datatype_bytes  : two packed halves, where one half may be all-zero
 """
 
 from __future__ import annotations
@@ -24,9 +25,16 @@ from pathlib import Path
 import numpy as np
 
 
-EXPECTED_OUTPUT_LENGTH = 256
+DEFAULT_OUTPUT_LENGTH = 512
 BYTES_PER_INT24 = 3
-TRACE_BYTES = EXPECTED_OUTPUT_LENGTH * BYTES_PER_INT24
+
+
+def _bytes_per_elem(datatype: str) -> int:
+    if datatype == "INT16":
+        return 2
+    if datatype == "INT24":
+        return 3
+    raise ValueError(f"Unsupported datatype: {datatype}")
 
 
 def _decode_int24_le(raw_bytes: np.ndarray) -> np.ndarray:
@@ -44,17 +52,33 @@ def _decode_int24_le(raw_bytes: np.ndarray) -> np.ndarray:
     return vals
 
 
-def _select_payload(raw: np.ndarray, half: str) -> tuple[np.ndarray, str]:
-    if raw.size == TRACE_BYTES:
+def _decode_int16_le(raw_bytes: np.ndarray) -> np.ndarray:
+    if raw_bytes.dtype != np.uint8:
+        raw_bytes = raw_bytes.astype(np.uint8, copy=False)
+    if raw_bytes.size % 2 != 0:
+        raise ValueError(f"INT16 payload length must be a multiple of 2 bytes, got {raw_bytes.size}")
+    return np.frombuffer(raw_bytes.tobytes(), dtype="<i2").astype(np.int32)
+
+
+def _decode_signed_le(raw_bytes: np.ndarray, datatype: str) -> np.ndarray:
+    if datatype == "INT16":
+        return _decode_int16_le(raw_bytes)
+    if datatype == "INT24":
+        return _decode_int24_le(raw_bytes)
+    raise ValueError(f"Unsupported datatype: {datatype}")
+
+
+def _select_payload(raw: np.ndarray, half: str, trace_bytes: int) -> tuple[np.ndarray, str]:
+    if raw.size == trace_bytes:
         return raw, "single_trace"
 
-    if raw.size != 2 * TRACE_BYTES:
+    if raw.size != 2 * trace_bytes:
         raise ValueError(
-            f"Expected either {TRACE_BYTES} or {2 * TRACE_BYTES} raw bytes, got {raw.size}"
+            f"Expected either {trace_bytes} or {2 * trace_bytes} raw bytes, got {raw.size}"
         )
 
-    first = raw[:TRACE_BYTES]
-    second = raw[TRACE_BYTES:]
+    first = raw[:trace_bytes]
+    second = raw[trace_bytes:]
     first_nz = int(np.count_nonzero(first))
     second_nz = int(np.count_nonzero(second))
 
@@ -75,17 +99,28 @@ def _select_payload(raw: np.ndarray, half: str) -> tuple[np.ndarray, str]:
     )
 
 
-def main(input_bin: str, out_npy: str, out_txt: str | None, half: str) -> None:
+def main(
+    input_bin: str,
+    out_npy: str,
+    out_txt: str | None,
+    half: str,
+    datatype: str,
+    length: int,
+) -> None:
     input_path = Path(input_bin).resolve()
     out_npy_path = Path(out_npy).resolve()
     out_txt_path = Path(out_txt).resolve() if out_txt is not None else None
+    datatype = datatype.upper()
+    if length <= 0:
+        raise ValueError(f"length must be positive, got {length}")
 
     if not input_path.is_file():
         raise FileNotFoundError(f"Input bin not found: {input_path}")
 
     raw = np.fromfile(input_path, dtype=np.uint8)
-    selected_raw, payload_mode = _select_payload(raw, half)
-    decoded = _decode_int24_le(selected_raw).reshape(1, EXPECTED_OUTPUT_LENGTH)
+    trace_bytes = length * _bytes_per_elem(datatype)
+    selected_raw, payload_mode = _select_payload(raw, half, trace_bytes)
+    decoded = _decode_signed_le(selected_raw, datatype).reshape(1, length)
 
     out_npy_path.parent.mkdir(parents=True, exist_ok=True)
     np.save(out_npy_path, decoded.astype(np.int32))
@@ -98,18 +133,21 @@ def main(input_bin: str, out_npy: str, out_txt: str | None, half: str) -> None:
     if out_txt_path is not None:
         print(f"[OK] Wrote decoded output txt: {out_txt_path}")
     print(f"raw bytes                : {raw.size}")
+    print(f"datatype                 : {datatype}")
+    print(f"output length            : {length}")
+    print(f"expected trace bytes     : {trace_bytes}")
     print(f"payload selection        : {payload_mode}")
     print(f"decoded shape            : {decoded.shape}")
     print(f"decoded dtype            : {decoded.dtype}")
     print(f"decoded min/max          : {decoded.min()} / {decoded.max()}")
     print(f"decoded nonzero count    : {np.count_nonzero(decoded)}")
-    print("board contract           : this file represents one batch of 256 scalar INT24 outputs")
+    print(f"board contract           : this file represents one batch of {length} scalar {datatype} outputs")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--input_bin", type=str, default="output.bin")
-    ap.add_argument("--out_npy", type=str, default="output_1x256_raw.npy")
+    ap.add_argument("--out_npy", type=str, default="output_1x512_raw.npy")
     ap.add_argument(
         "--out_txt",
         type=str,
@@ -121,7 +159,20 @@ if __name__ == "__main__":
         type=str,
         choices=["auto", "first", "second"],
         default="auto",
-        help="How to handle 1536-byte payloads.",
+        help="How to handle payloads that contain two traces instead of one.",
+    )
+    ap.add_argument(
+        "--datatype",
+        type=str,
+        choices=["INT16", "INT24", "int16", "int24"],
+        default="INT16",
+        help="Packed output datatype reported by the generated FINN driver.",
+    )
+    ap.add_argument(
+        "--length",
+        type=int,
+        default=DEFAULT_OUTPUT_LENGTH,
+        help="Number of scalar output elements in oshape_normal, e.g. 512 for flattened real/imag.",
     )
     args = ap.parse_args()
     main(
@@ -129,4 +180,6 @@ if __name__ == "__main__":
         out_npy=args.out_npy,
         out_txt=args.out_txt,
         half=args.half,
+        datatype=args.datatype,
+        length=args.length,
     )

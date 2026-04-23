@@ -1,7 +1,7 @@
 # Step 3
 # pip install brevitas qonnx onnx onnxruntime onnxoptimizer
 # python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 10 --qonnx_out deeponet_u250_int8_qonnx.onnx
-# python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 10 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --output_bit_width 4 --qonnx_out model_lowbit.onnx
+# python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 10 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --output_bit_width 4 --qonnx_out deeponet_u250_int4_flat_qonnx.onnx
 
 import argparse
 from dataclasses import dataclass
@@ -105,7 +105,11 @@ class BranchMLPQuant(nn.Module):
 class DeepONetFinnDeployQuant(nn.Module):
     """
     Full deploy model for FINN:
-      u_in -> BranchMLPQuant -> b(2P) -> 2 fixed-weight QuantLinear layers -> packed [B, 2, N_t]
+      u_in -> BranchMLPQuant -> b(2P) -> 2 fixed-weight QuantLinear layers -> [B, 2*N_t]
+
+    Output layout:
+      out[:, :N_t]  = real(A(L,t))
+      out[:, N_t:]  = imag(A(L,t))
     """
 
     def __init__(self, M_real: torch.Tensor, M_imag: torch.Tensor, hidden: int, quant_cfg: QuantConfig):
@@ -158,7 +162,7 @@ class DeepONetFinnDeployQuant(nn.Module):
         branch_out = self.branch(u_in)
         real = self.real_fc(branch_out)
         imag = self.imag_fc(branch_out)
-        out = torch.stack([real, imag], dim=1)
+        out = torch.cat([real, imag], dim=1)
         if self.output_quant is not None:
             out = self.output_quant(out)
         return out
@@ -296,8 +300,8 @@ def main(
             idx = perm[i : i + 32]
             u_in, y_r, y_i = make_supervised_batch(A0[idx], AL_clean[idx], n_t_out, time_indices)
             pred = model(u_in)
-            pred_r = pred[:, 0, :]
-            pred_i = pred[:, 1, :]
+            pred_r = pred[:, :n_t_out]
+            pred_i = pred[:, n_t_out : 2 * n_t_out]
             loss = ((pred_r - y_r) ** 2 + (pred_i - y_i) ** 2).mean()
 
             opt.zero_grad(set_to_none=True)

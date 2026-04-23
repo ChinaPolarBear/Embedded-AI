@@ -1,9 +1,9 @@
 """
-Prepare the current board-facing INT8 `input.bin` from `input.npy`.
+Prepare the current board-facing signed integer `input.bin` from `input.npy`.
 
 This helper targets the deploy package interface we already observed on the board:
   - input normal shape: (1, 512)
-  - input datatype    : INT8
+  - input datatype    : INT4 for the current low-bit build
 
 Typical usage:
     python board_prepare_input_bin.py ^
@@ -26,9 +26,9 @@ from pathlib import Path
 import numpy as np
 
 
-DEFAULT_INPUT_SCALE = 0.014311009
+DEFAULT_INPUT_SCALE = 0.2301655113697052
 DEFAULT_ZERO_POINT = 0.0
-DEFAULT_BIT_WIDTH = 8
+DEFAULT_BIT_WIDTH = 4
 
 
 def _load_quant_params_from_model(model_path: Path) -> tuple[float, float, int] | None:
@@ -84,10 +84,10 @@ def _resolve_quant_params(model_path: Path | None, scale: float | None) -> tuple
 
 
 def _quantize_signed(arr: np.ndarray, scale: float, zero_point: float, bit_width: int) -> np.ndarray:
-    if bit_width != 8:
-        raise ValueError(f"This helper currently expects INT8 input, got bit_width={bit_width}")
+    if bit_width < 1 or bit_width > 8:
+        raise ValueError(f"This helper expects a signed input bit width in [1, 8], got {bit_width}")
     if abs(zero_point) > 1e-9:
-        raise ValueError(f"This helper expects zero_point=0 for signed INT8 input, got {zero_point}")
+        raise ValueError(f"This helper expects zero_point=0 for signed integer input, got {zero_point}")
     if scale <= 0:
         raise ValueError(f"scale must be positive, got {scale}")
 
@@ -125,8 +125,10 @@ def main(input_npy: str, out_bin: str, out_npy: str | None, model: str | None, s
         out_npy_path.parent.mkdir(parents=True, exist_ok=True)
         np.save(out_npy_path, q_arr)
 
-    sat_min = int(np.count_nonzero(q_arr == np.iinfo(np.int8).min))
-    sat_max = int(np.count_nonzero(q_arr == np.iinfo(np.int8).max))
+    qmin = -(2 ** (q_bw - 1))
+    qmax = (2 ** (q_bw - 1)) - 1
+    sat_min = int(np.count_nonzero(q_arr == qmin))
+    sat_max = int(np.count_nonzero(q_arr == qmax))
 
     print(f"[OK] Wrote board input bin: {out_bin_path}")
     if out_npy_path is not None:
@@ -138,9 +140,12 @@ def main(input_npy: str, out_bin: str, out_npy: str | None, model: str | None, s
     print(f"zero point              : {q_zero:.9g}")
     print(f"bit width               : {q_bw}")
     print(f"float range             : [{arr.min():.6g}, {arr.max():.6g}]")
-    print(f"int8 range              : [{q_arr.min()}, {q_arr.max()}]")
+    print(f"int{q_bw} range             : [{q_arr.min()}, {q_arr.max()}]")
     print(f"saturation count        : min={sat_min}, max={sat_max}")
-    print("board contract          : input.bin now contains exactly 512 signed INT8 values")
+    print(
+        "board contract          : input.bin now contains exactly 512 signed integer values "
+        f"for an INT{q_bw} FINN input"
+    )
 
 
 if __name__ == "__main__":
@@ -150,13 +155,13 @@ if __name__ == "__main__":
     ap.add_argument(
         "--out_npy",
         type=str,
-        default="verification_io/input_int8.npy",
-        help="Optional saved INT8 tensor for inspection.",
+        default="verification_io/input_int4.npy",
+        help="Optional saved quantized tensor for inspection.",
     )
     ap.add_argument(
         "--model",
         type=str,
-        default="deeponet_u250_int8_qonnx_ready.onnx",
+        default="deeponet_u250_int4_qonnx_ready.onnx",
         help="Optional QONNX model used to auto-read the input quantization scale.",
     )
     ap.add_argument(

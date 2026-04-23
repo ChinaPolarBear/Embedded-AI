@@ -14,10 +14,13 @@ This script:
   4) Saves:
        - input.npy
        - ssfm_output.npy
+       - ssfm_output_flat.npy
        - verification_case.npz
 
 Notes:
   - `input.npy` is the float32 branch input expected by the exported deploy model.
+  - `ssfm_output_flat.npy` matches the flattened deploy output layout:
+    first 256 values are real, last 256 values are imag.
   - If your board runtime later expects a quantized/raw format, keep this script as the
     source of truth for the waveform and add the board-specific conversion in the host code.
 """
@@ -123,10 +126,12 @@ def main(out_dir: str, source: str, sample_index: int, seed: int | None) -> None
 
     u_in = u_in_t.detach().cpu().numpy().astype(np.float32)
     ssfm_output = _complex_to_two_channel(AL_clean)[None, :, :]
+    ssfm_output_flat = np.concatenate([ssfm_output[:, 0, :], ssfm_output[:, 1, :]], axis=1)
     t_grid = pm.t_grid.detach().cpu().numpy().astype(np.float32)
 
     np.save(out_dir_path / "input.npy", u_in)
     np.save(out_dir_path / "ssfm_output.npy", ssfm_output)
+    np.save(out_dir_path / "ssfm_output_flat.npy", ssfm_output_flat.astype(np.float32))
     np.savez(
         out_dir_path / "verification_case.npz",
         source=np.array([source_desc]),
@@ -134,10 +139,12 @@ def main(out_dir: str, source: str, sample_index: int, seed: int | None) -> None
         seed=np.array([-1 if seed is None else seed], dtype=np.int64),
         input_format=np.array(["branch_input_real_imag_float32"]),
         output_format=np.array(["two_channel_real_imag_float32"]),
+        flattened_output_format=np.array(["flat_real_then_imag_float32"]),
         t_grid=t_grid,
         propagation_distance=np.array([pm.L], dtype=np.float32),
         u_in=u_in,
         ssfm_output=ssfm_output,
+        ssfm_output_flat=ssfm_output_flat.astype(np.float32),
         A0_real=A0.real.detach().cpu().numpy().astype(np.float32),
         A0_imag=A0.imag.detach().cpu().numpy().astype(np.float32),
         AL_clean_real=AL_clean.real.detach().cpu().numpy().astype(np.float32),
@@ -149,6 +156,7 @@ def main(out_dir: str, source: str, sample_index: int, seed: int | None) -> None
     print(f"     seed          : {seed if seed is not None else 'none'}")
     print(f"     input.npy     : shape={tuple(u_in.shape)} dtype={u_in.dtype}")
     print(f"     ssfm_output   : shape={tuple(ssfm_output.shape)} dtype={ssfm_output.dtype}")
+    print(f"     ssfm_flat     : shape={tuple(ssfm_output_flat.shape)} dtype={ssfm_output_flat.dtype}")
     print("     note          : input.npy is float32 deploy input; board-specific raw quantization")
     print("                     should be added later in the board host/runtime layer.")
 
