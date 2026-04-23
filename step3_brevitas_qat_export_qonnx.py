@@ -1,7 +1,7 @@
 # Step 3
 # pip install brevitas qonnx onnx onnxruntime onnxoptimizer
-# python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 10 --qonnx_out deeponet_u250_int8_qonnx.onnx
-# python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 10 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --output_bit_width 4 --qonnx_out deeponet_u250_int4_flat_qonnx.onnx
+
+# python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 10 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --output_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
 
 import argparse
 from dataclasses import dataclass
@@ -105,7 +105,7 @@ class BranchMLPQuant(nn.Module):
 class DeepONetFinnDeployQuant(nn.Module):
     """
     Full deploy model for FINN:
-      u_in -> BranchMLPQuant -> b(2P) -> 2 fixed-weight QuantLinear layers -> [B, 2*N_t]
+      u_in -> BranchMLPQuant -> b(2P) -> 1 fixed-weight QuantLinear layer -> [B, 2*N_t]
 
     Output layout:
       out[:, :N_t]  = real(A(L,t))
@@ -127,16 +127,9 @@ class DeepONetFinnDeployQuant(nn.Module):
             quant_cfg=quant_cfg,
         )
 
-        self.real_fc = QuantLinear(
+        self.out_fc = QuantLinear(
             two_p,
-            n_t,
-            weight_quant=Int8WeightPerTensorFloat,
-            weight_bit_width=quant_cfg.weight_bit_width,
-            bias=False,
-        )
-        self.imag_fc = QuantLinear(
-            two_p,
-            n_t,
+            2 * n_t,
             weight_quant=Int8WeightPerTensorFloat,
             weight_bit_width=quant_cfg.weight_bit_width,
             bias=False,
@@ -150,19 +143,15 @@ class DeepONetFinnDeployQuant(nn.Module):
             )
 
         with torch.no_grad():
-            self.real_fc.weight.copy_(M_real)
-            self.imag_fc.weight.copy_(M_imag)
+            # Keep a single 512-wide output stream for FINN driver generation.
+            self.out_fc.weight.copy_(torch.cat([M_real, M_imag], dim=0))
 
-        for param in self.real_fc.parameters():
-            param.requires_grad = False
-        for param in self.imag_fc.parameters():
+        for param in self.out_fc.parameters():
             param.requires_grad = False
 
     def forward(self, u_in):
         branch_out = self.branch(u_in)
-        real = self.real_fc(branch_out)
-        imag = self.imag_fc(branch_out)
-        out = torch.cat([real, imag], dim=1)
+        out = self.out_fc(branch_out)
         if self.output_quant is not None:
             out = self.output_quant(out)
         return out

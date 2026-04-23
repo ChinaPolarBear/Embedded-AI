@@ -14,13 +14,14 @@ This script:
   4) Saves:
        - input.npy
        - ssfm_output.npy
-       - ssfm_output_flat.npy
+       - ssfm_output_probe.npy
        - verification_case.npz
 
 Notes:
-  - `input.npy` is the float32 branch input expected by the exported deploy model.
-  - `ssfm_output_flat.npy` matches the flattened deploy output layout:
-    first 256 values are real, last 256 values are imag.
+  - `input.npy` is the compact float32 complex input expected by the exported probe model:
+    first 128 values are real(A(0,t_probe)), last 128 values are imag(A(0,t_probe)).
+  - `ssfm_output_probe.npy` matches the compact deploy output layout:
+    first 128 values are real(A(L,t_probe)), last 128 values are imag(A(L,t_probe)).
   - If your board runtime later expects a quantized/raw format, keep this script as the
     source of truth for the waveform and add the board-specific conversion in the host code.
 """
@@ -113,6 +114,10 @@ def _complex_to_two_channel(x: torch.Tensor) -> np.ndarray:
     return np.stack([x_np.real.astype(np.float32), x_np.imag.astype(np.float32)], axis=0)
 
 
+def _probe_indices() -> torch.Tensor:
+    return torch.arange(0, pm.N_t, 2)[: pm.N_t // 2].long()
+
+
 def main(out_dir: str, source: str, sample_index: int, seed: int | None) -> None:
     _set_seed(seed)
 
@@ -120,31 +125,43 @@ def main(out_dir: str, source: str, sample_index: int, seed: int | None) -> None
     out_dir_path.mkdir(parents=True, exist_ok=True)
 
     A0, AL_clean, source_desc = _select_sample(source, sample_index)
+    probe_indices = _probe_indices()
 
     with torch.no_grad():
-        u_in_t = pm.make_branch_input(A0.unsqueeze(0)).float()
+        A0_probe = A0[probe_indices]
+        u_in_t = torch.cat([A0_probe.real, A0_probe.imag], dim=0).unsqueeze(0).float()
 
     u_in = u_in_t.detach().cpu().numpy().astype(np.float32)
     ssfm_output = _complex_to_two_channel(AL_clean)[None, :, :]
-    ssfm_output_flat = np.concatenate([ssfm_output[:, 0, :], ssfm_output[:, 1, :]], axis=1)
+    AL_probe = AL_clean[probe_indices]
+    ssfm_output_probe = np.concatenate(
+        [
+            AL_probe.real.detach().cpu().numpy().astype(np.float32),
+            AL_probe.imag.detach().cpu().numpy().astype(np.float32),
+        ]
+    )[None, :]
     t_grid = pm.t_grid.detach().cpu().numpy().astype(np.float32)
+    probe_t_grid = t_grid[probe_indices.detach().cpu().numpy()]
 
     np.save(out_dir_path / "input.npy", u_in)
     np.save(out_dir_path / "ssfm_output.npy", ssfm_output)
-    np.save(out_dir_path / "ssfm_output_flat.npy", ssfm_output_flat.astype(np.float32))
+    np.save(out_dir_path / "ssfm_output_probe.npy", ssfm_output_probe)
     np.savez(
         out_dir_path / "verification_case.npz",
         source=np.array([source_desc]),
         sample_index=np.array([sample_index], dtype=np.int32),
         seed=np.array([-1 if seed is None else seed], dtype=np.int64),
-        input_format=np.array(["branch_input_real_imag_float32"]),
+        input_format=np.array(["compact_real128_imag128_float32"]),
         output_format=np.array(["two_channel_real_imag_float32"]),
-        flattened_output_format=np.array(["flat_real_then_imag_float32"]),
+        deploy_output_format=np.array(["compact_real128_imag128_float32"]),
         t_grid=t_grid,
+        deploy_t_grid=probe_t_grid,
         propagation_distance=np.array([pm.L], dtype=np.float32),
         u_in=u_in,
         ssfm_output=ssfm_output,
-        ssfm_output_flat=ssfm_output_flat.astype(np.float32),
+        ssfm_output_probe=ssfm_output_probe,
+        expected_output=ssfm_output_probe,
+        probe_indices=probe_indices.detach().cpu().numpy().astype(np.int32),
         A0_real=A0.real.detach().cpu().numpy().astype(np.float32),
         A0_imag=A0.imag.detach().cpu().numpy().astype(np.float32),
         AL_clean_real=AL_clean.real.detach().cpu().numpy().astype(np.float32),
@@ -156,7 +173,7 @@ def main(out_dir: str, source: str, sample_index: int, seed: int | None) -> None
     print(f"     seed          : {seed if seed is not None else 'none'}")
     print(f"     input.npy     : shape={tuple(u_in.shape)} dtype={u_in.dtype}")
     print(f"     ssfm_output   : shape={tuple(ssfm_output.shape)} dtype={ssfm_output.dtype}")
-    print(f"     ssfm_flat     : shape={tuple(ssfm_output_flat.shape)} dtype={ssfm_output_flat.dtype}")
+    print(f"     ssfm_probe    : shape={tuple(ssfm_output_probe.shape)} dtype={ssfm_output_probe.dtype}")
     print("     note          : input.npy is float32 deploy input; board-specific raw quantization")
     print("                     should be added later in the board host/runtime layer.")
 

@@ -2,14 +2,14 @@
 Decode the current board-facing single-output `output.bin`.
 
 This helper targets the deploy package interface we observed in the generated driver:
-  - output normal shape: (1, 512) for the flattened real/imag build
+  - output normal shape: (1, 256), laid out as [real128, imag128]
   - output datatype    : usually INT16 for the current low-bit build
 
 Typical usage:
     python board_decode_output_bin.py ^
         --input_bin output.bin ^
-        --out_npy output_1x512_raw.npy ^
-        --length 512 ^
+        --out_npy output_1x256_raw.npy ^
+        --length 256 ^
         --datatype INT16
 
 Supported raw sizes:
@@ -25,7 +25,7 @@ from pathlib import Path
 import numpy as np
 
 
-DEFAULT_OUTPUT_LENGTH = 512
+DEFAULT_OUTPUT_LENGTH = 256
 BYTES_PER_INT24 = 3
 
 
@@ -147,7 +147,7 @@ def main(
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--input_bin", type=str, default="output.bin")
-    ap.add_argument("--out_npy", type=str, default="output_1x512_raw.npy")
+    ap.add_argument("--out_npy", type=str, default="output_1x256_raw.npy")
     ap.add_argument(
         "--out_txt",
         type=str,
@@ -172,7 +172,7 @@ if __name__ == "__main__":
         "--length",
         type=int,
         default=DEFAULT_OUTPUT_LENGTH,
-        help="Number of scalar output elements in oshape_normal, e.g. 512 for flattened real/imag.",
+        help="Number of scalar output elements in oshape_normal, e.g. 256 for the compact complex probe build.",
     )
     args = ap.parse_args()
     main(

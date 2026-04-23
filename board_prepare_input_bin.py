@@ -2,7 +2,7 @@
 Prepare the current board-facing signed integer `input.bin` from `input.npy`.
 
 This helper targets the deploy package interface we already observed on the board:
-  - input normal shape: (1, 512)
+  - input normal shape: (1, 256), laid out as [real128, imag128]
   - input datatype    : INT4 for the current low-bit build
 
 Typical usage:
@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 
 
-DEFAULT_INPUT_SCALE = 0.2301655113697052
+DEFAULT_INPUT_SCALE = 0.22732384502887726
 DEFAULT_ZERO_POINT = 0.0
 DEFAULT_BIT_WIDTH = 4
 
@@ -46,7 +46,14 @@ def _load_quant_params_from_model(model_path: Path) -> tuple[float, float, int] 
         return None
 
     graph_input_name = model.graph.input[0].name
-    init_map = {init.name: numpy_helper.to_array(init) for init in model.graph.initializer}
+    value_map = {init.name: numpy_helper.to_array(init) for init in model.graph.initializer}
+    for node in model.graph.node:
+        if node.op_type != "Constant" or not node.output:
+            continue
+        for attr in node.attribute:
+            if attr.name == "value":
+                value_map[node.output[0]] = numpy_helper.to_array(attr.t)
+                break
 
     for node in model.graph.node:
         if node.op_type != "Quant":
@@ -59,12 +66,12 @@ def _load_quant_params_from_model(model_path: Path) -> tuple[float, float, int] 
         scale_name = node.input[1]
         zero_name = node.input[2]
         bit_width_name = node.input[3]
-        if scale_name not in init_map or zero_name not in init_map or bit_width_name not in init_map:
+        if scale_name not in value_map or zero_name not in value_map or bit_width_name not in value_map:
             return None
 
-        scale = float(np.asarray(init_map[scale_name]).reshape(()))
-        zero_point = float(np.asarray(init_map[zero_name]).reshape(()))
-        bit_width = int(round(float(np.asarray(init_map[bit_width_name]).reshape(()))))
+        scale = float(np.asarray(value_map[scale_name]).reshape(()))
+        zero_point = float(np.asarray(value_map[zero_name]).reshape(()))
+        bit_width = int(round(float(np.asarray(value_map[bit_width_name]).reshape(()))))
         return scale, zero_point, bit_width
 
     return None
@@ -110,9 +117,9 @@ def main(input_npy: str, out_bin: str, out_npy: str | None, model: str | None, s
 
     arr = np.load(input_path)
     arr = np.asarray(arr, dtype=np.float32)
-    if arr.shape != (1, 512):
+    if arr.shape != (1, 256):
         raise ValueError(
-            f"Expected input.npy shape (1, 512) for the current board interface, got {arr.shape}"
+            f"Expected input.npy shape (1, 256) for the current board interface, got {arr.shape}"
         )
 
     q_scale, q_zero, q_bw, scale_source = _resolve_quant_params(model_path, scale)
@@ -143,7 +150,7 @@ def main(input_npy: str, out_bin: str, out_npy: str | None, model: str | None, s
     print(f"int{q_bw} range             : [{q_arr.min()}, {q_arr.max()}]")
     print(f"saturation count        : min={sat_min}, max={sat_max}")
     print(
-        "board contract          : input.bin now contains exactly 512 signed integer values "
+        "board contract          : input.bin now contains exactly 256 signed integer values "
         f"for an INT{q_bw} FINN input"
     )
 
@@ -161,7 +168,7 @@ if __name__ == "__main__":
     ap.add_argument(
         "--model",
         type=str,
-        default="deeponet_u250_int4_qonnx_ready.onnx",
+        default="deeponet_u250_int4_qonnx.onnx",
         help="Optional QONNX model used to auto-read the input quantization scale.",
     )
     ap.add_argument(
