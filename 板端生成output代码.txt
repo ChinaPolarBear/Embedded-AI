@@ -1,0 +1,244 @@
+板端生成 output.bin 的最小流程（compact complex 探针版本：INT4 输入 / 预期 INT16 输出）
+
+当前目标已经改成 compact complex 单向量输出，不再使用 (1, 2, 256) 双通道 shape。
+
+新的模型输出约定：
+
+output shape = (1, 256)
+output[0, 0:128] = real(A(L,t_probe))
+output[0, 128:256] = imag(A(L,t_probe))
+
+重新跑 FINN build_dataflow 后，请先打开新的 deploy/driver/driver.py 确认：
+
+idt = INT4
+ishape_normal = (1, 256)
+oshape_normal = (1, 256)
+
+如果 driver.py 里显示：
+
+odt = INT16
+oshape_packed = (1, 256, 2)
+
+那么：
+
+input.bin 预期大小 = 1 * 256 * 1 = 256 bytes
+output.bin 预期大小 = 1 * 256 * 2 = 512 bytes
+output.npy 解码后 shape = (1, 256)
+input/output 的 256 个标量都是 compact complex 布局：前 128 real，后 128 imag。
+
+如果你的新 driver.py 里 odt 不是 INT16，请以 driver.py 里的 odt 和 oshape_packed 为准。下面的 C++ 和 Python 解码代码默认按 INT16 写。
+
+目录约定：
+
+板端 driver 目录：
+
+/home/xband/finn/my_build/output_u250_bitfile/deploy/driver
+
+该目录里需要有：
+
+input.bin
+../bitfile/finn-accel.xclbin
+
+运行 Python 前建议先进入 runtime 环境：
+
+source ~/finn_runtime_env/bin/activate
+
+第 0 步：如果需要重新切 shell，可按你机器当前有效的 shell 路径执行
+
+sudo /opt/xilinx/xrt/bin/xbmgmt program --device 65:00.0 --shell /lib/firmware/xilinx/12c8fafb0632499db1c0c6676271b8a6/partition.xsabin
+sudo /opt/xilinx/xrt/bin/xbutil examine
+
+第 1 步：确认 input.bin 大小
+
+cd /home/xband/finn/my_build/output_u250_bitfile/deploy/driver
+python3 - <<'PY'
+from pathlib import Path
+
+p = Path("input.bin")
+if not p.is_file():
+    raise FileNotFoundError("input.bin not found in current driver directory")
+
+size = p.stat().st_size
+print("input.bin bytes:", size)
+if size != 256:
+    raise RuntimeError(f"Expected input.bin to be 256 bytes for INT4 packed input, got {size}")
+print("input.bin size check passed")
+PY
+
+第 2 步：保存下面这个板端 XRT 程序为 run_finn_xrt.cpp
+
+cd /home/xband/finn/my_build/output_u250_bitfile/deploy/driver
+nano run_finn_xrt.cpp
+
+然后把下面代码完整粘贴进去：
+
+#include <fstream>
+#include <iostream>
+#include <vector>
+#include <cstring>
+#include <stdexcept>
+#include <cstdint>
+
+#include <xrt/xrt_bo.h>
+#include <xrt/xrt_device.h>
+#include <xrt/xrt_kernel.h>
+
+static std::vector<char> read_binary_file(const std::string& filename) {
+    std::ifstream ifs(filename, std::ios::binary | std::ios::ate);
+    if (!ifs) {
+        throw std::runtime_error("Cannot open file: " + filename);
+    }
+
+    std::streamsize size = ifs.tellg();
+    if (size < 0) {
+        throw std::runtime_error("Failed to get file size: " + filename);
+    }
+
+    ifs.seekg(0, std::ios::beg);
+    std::vector<char> buffer(static_cast<size_t>(size));
+    if (!ifs.read(buffer.data(), size)) {
+        throw std::runtime_error("Failed to read file: " + filename);
+    }
+    return buffer;
+}
+
+int main() {
+    try {
+        const std::string xclbin_path = "../bitfile/finn-accel.xclbin";
+        const std::string input_path = "input.bin";
+        const std::string output_path = "output.bin";
+
+        const size_t input_bytes = 1 * 256 * 1;
+        const size_t output_elems = 1 * 256;
+        const size_t bytes_per_output_elem = 2;
+        const size_t output_bytes = output_elems * bytes_per_output_elem;
+        const uint32_t numReps = 1;
+
+        std::cout << "Opening device 0..." << std::endl;
+        auto device = xrt::device(0);
+
+        std::cout << "Loading xclbin: " << xclbin_path << std::endl;
+        auto uuid = device.load_xclbin(xclbin_path);
+
+        std::cout << "Opening kernels..." << std::endl;
+        auto idma = xrt::kernel(device, uuid, "StreamingDataflowPartition_0");
+        auto odma = xrt::kernel(device, uuid, "StreamingDataflowPartition_2");
+
+        std::cout << "Allocating buffers..." << std::endl;
+        auto in_bo = xrt::bo(device, input_bytes, idma.group_id(0));
+        auto out_bo = xrt::bo(device, output_bytes, odma.group_id(0));
+
+        auto in_map = in_bo.map<uint8_t*>();
+        auto out_map = out_bo.map<uint8_t*>();
+
+        std::cout << "Reading input.bin..." << std::endl;
+        auto input_data = read_binary_file(input_path);
+        if (input_data.size() != input_bytes) {
+            std::cerr << "Input size mismatch. Expected "
+                      << input_bytes
+                      << " bytes, got "
+                      << input_data.size()
+                      << " bytes."
+                      << std::endl;
+            return 1;
+        }
+
+        std::memcpy(in_map, input_data.data(), input_bytes);
+        std::memset(out_map, 0, output_bytes);
+
+        std::cout << "Sync input buffer to device..." << std::endl;
+        in_bo.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        out_bo.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+        std::cout << "Starting output DMA first..." << std::endl;
+        auto odma_run = odma(out_bo, numReps);
+
+        std::cout << "Starting input DMA..." << std::endl;
+        auto idma_run = idma(in_bo, numReps);
+
+        std::cout << "Waiting for IDMA..." << std::endl;
+        idma_run.wait();
+
+        std::cout << "Waiting for ODMA..." << std::endl;
+        odma_run.wait();
+
+        std::cout << "Sync output buffer from device..." << std::endl;
+        out_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+
+        std::cout << "Writing output.bin..." << std::endl;
+        std::ofstream ofs(output_path, std::ios::binary);
+        if (!ofs) {
+            throw std::runtime_error("Cannot open output file: " + output_path);
+        }
+
+        ofs.write(
+            reinterpret_cast<char*>(out_map),
+            static_cast<std::streamsize>(output_bytes)
+        );
+        ofs.close();
+
+        std::cout << "Done. Output saved to " << output_path << std::endl;
+        std::cout << "Expected input bytes: " << input_bytes << std::endl;
+        std::cout << "Expected output tensor shape: (1, 256)" << std::endl;
+        std::cout << "Expected output layout: first 128 real, last 128 imag" << std::endl;
+        std::cout << "Expected output datatype: INT16" << std::endl;
+        std::cout << "Expected output bytes: " << output_bytes << std::endl;
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "ERROR: " << e.what() << std::endl;
+        return 1;
+    }
+}
+
+第 3 步：编译 XRT 程序
+
+source /opt/xilinx/xrt/setup.sh
+cd /home/xband/finn/my_build/output_u250_bitfile/deploy/driver
+g++ -std=c++17 run_finn_xrt.cpp -o run_finn_xrt -I/opt/xilinx/xrt/include -L/opt/xilinx/xrt/lib -lxrt_coreutil
+
+第 4 步：运行板端程序，生成 output.bin
+
+cd /home/xband/finn/my_build/output_u250_bitfile/deploy/driver
+source /opt/xilinx/xrt/setup.sh
+./run_finn_xrt
+
+第 5 步：快速检查 output.bin，并按 (1,256) 解码
+
+cd /home/xband/finn/my_build/output_u250_bitfile/deploy/driver
+python3 - <<'PY'
+from pathlib import Path
+import numpy as np
+
+p = Path("output.bin")
+if not p.is_file():
+    raise FileNotFoundError("output.bin not found")
+
+raw = np.fromfile("output.bin", dtype=np.uint8)
+print("raw bytes:", raw.size)
+if raw.size != 512:
+    raise RuntimeError(f"Expected 512 bytes for INT16 (1,256), got {raw.size}")
+
+y_raw = np.fromfile("output.bin", dtype="<i2").astype(np.int32).reshape(1, 256)
+np.save("output_raw_int16_1x256.npy", y_raw)
+np.save("output.npy", y_raw.astype(np.float32))
+
+print("Saved output_raw_int16_1x256.npy")
+print("Saved output.npy")
+print("output_raw shape:", y_raw.shape)
+print("output_raw dtype:", y_raw.dtype)
+print("output_raw min/max:", y_raw.min(), y_raw.max())
+print("real first 20:", y_raw[0, :20])
+print("imag first 20:", y_raw[0, 128:148])
+print("real nonzero:", np.count_nonzero(y_raw[0, :128]))
+print("imag nonzero:", np.count_nonzero(y_raw[0, 128:]))
+PY
+
+第 6 步：把 output.bin 发回本地
+
+这次优先把 output.bin 发回给我。
+如果方便，也可以一起发：
+
+output_raw_int16_1x256.npy
+output.npy
+
+我会在本地按 (1,256) 的 compact complex 结构重新解码和验证。

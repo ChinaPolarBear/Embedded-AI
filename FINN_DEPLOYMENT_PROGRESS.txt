@@ -32,15 +32,12 @@ Completed steps so far:
 - result: raw QONNX export succeeded.
 - artifact produced: deeponet_u250_int8_qonnx.onnx
 
-4. step4.1_export_QONNX_ready_model.py
-- QONNX cleanup / validation succeeded.
-- artifact produced: deeponet_u250_int8_qonnx_ready.onnx
-
-5. step4.2_convert_qonnx_to_finn.py
+4. step4_convert_qonnx_to_finn.py
+- QONNX cleanup / validation is now handled inside Step 4.
 - FINN-ONNX conversion succeeded.
 - artifact produced: deeponet_u250_int8_qonnx_finn.onnx
 
-6. build_dataflow setup
+5. build_dataflow setup
 - my_build directory structure has been prepared conceptually around:
   - model.onnx
   - dataflow_build_config.json
@@ -140,11 +137,10 @@ Current recommended next action:
 Useful checkpoint artifacts already produced:
 - trunk_matrices.npz
 - deeponet_u250_int8_qonnx.onnx
-- deeponet_u250_int8_qonnx_ready.onnx
 - deeponet_u250_int8_qonnx_finn.onnx
 
 Personal reminder:
 - The deployment flow has already passed the raw QONNX export stage.
-- The deployment flow has already passed the FINN-ready QONNX stage.
+- The deployment flow now performs QONNX cleanup / validation inside Step 4.
 - The deployment flow has already passed FINN-ONNX conversion.
 - The current blocker is in hardware IP generation environment setup, not in the earlier model export logic.

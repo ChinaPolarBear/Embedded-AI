@@ -66,6 +66,63 @@ def _producer_map(model: ModelWrapper):
     return mapping
 
 
+def _consumer_map(model: ModelWrapper):
+    mapping = {}
+    for node in model.graph.node:
+        for input_name in node.input:
+            mapping.setdefault(input_name, []).append(node)
+    return mapping
+
+
+def _get_initializer_scalar(model: ModelWrapper, tensor_name: str):
+    initializer = model.get_initializer(tensor_name)
+    if initializer is None:
+        return None
+    if getattr(initializer, "shape", ()) not in [(), (1,)]:
+        return initializer
+    return numpy_helper.to_array(numpy_helper.from_array(initializer)).reshape(()).item()
+
+
+def _describe_quant_node(model: ModelWrapper, node) -> str | None:
+    if node.op_type != "Quant" or len(node.input) < 4:
+        return None
+
+    scale = _get_initializer_scalar(model, node.input[1])
+    zero_point = _get_initializer_scalar(model, node.input[2])
+    bit_width = _get_initializer_scalar(model, node.input[3])
+
+    if scale is None or zero_point is None or bit_width is None:
+        return "Quant node present, but scalar params are not folded into initializers yet"
+
+    try:
+        bit_width_text = str(int(round(float(bit_width))))
+    except Exception:
+        bit_width_text = str(bit_width)
+
+    return f"Quant(scale={scale}, zero_point={zero_point}, bit_width={bit_width_text})"
+
+
+def _quant_context_for_graph_input(model: ModelWrapper, tensor_name: str) -> list[str]:
+    contexts = []
+    consumers = _consumer_map(model).get(tensor_name, [])
+    for node in consumers:
+        if node.op_type == "Quant":
+            quant_desc = _describe_quant_node(model, node)
+            if quant_desc is not None:
+                contexts.append(f"consumed by {node.name or '<unnamed Quant>'}: {quant_desc}")
+    return contexts
+
+
+def _quant_context_for_graph_output(model: ModelWrapper, tensor_name: str) -> list[str]:
+    producer = _producer_map(model).get(tensor_name)
+    if producer is None or producer.op_type != "Quant":
+        return []
+    quant_desc = _describe_quant_node(model, producer)
+    if quant_desc is None:
+        return []
+    return [f"produced by {producer.name or '<unnamed Quant>'}: {quant_desc}"]
+
+
 def _is_const_like_tensor(model: ModelWrapper, tensor_name: str, producers) -> tuple[bool, str]:
     if model.get_initializer(tensor_name) is not None:
         return True, "initializer"
@@ -87,8 +144,12 @@ def print_model_summary(model: ModelWrapper, label: str) -> None:
     print(f"  ops={dict(ops)}")
     for graph_input in model.graph.input:
         print(f"  input  {graph_input.name}: shape={_get_tensor_shape(model, graph_input.name)} dtype={model.get_tensor_datatype(graph_input.name)}")
+        for ctx in _quant_context_for_graph_input(model, graph_input.name):
+            print(f"           quant_info={ctx}")
     for graph_output in model.graph.output:
         print(f"  output {graph_output.name}: shape={_get_tensor_shape(model, graph_output.name)} dtype={model.get_tensor_datatype(graph_output.name)}")
+        for ctx in _quant_context_for_graph_output(model, graph_output.name):
+            print(f"           quant_info={ctx}")
 
 
 def print_quant_summary(model: ModelWrapper) -> None:

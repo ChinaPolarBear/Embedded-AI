@@ -1,8 +1,10 @@
 # Step 3
 # pip install brevitas qonnx onnx onnxruntime onnxoptimizer
-# python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 10 --qonnx_out deeponet_u250_int8_qonnx.onnx
+
+# python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 10 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --output_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
 
 import argparse
+from dataclasses import dataclass
 import numpy as np
 import torch
 import torch.nn as nn
@@ -16,7 +18,33 @@ from brevitas.quant import Int8ActPerTensorFloat, Int8WeightPerTensorFloat, Uint
 from finn_qonnx_utils import ensure_brevitas_qonnx_export_support, print_initializer_shapes
 
 
-class BranchMLPInt8(nn.Module):
+@dataclass(frozen=True)
+class QuantConfig:
+    input_bit_width: int = 8
+    weight_bit_width: int = 8
+    act_bit_width: int = 8
+    output_bit_width: int | None = None
+
+    def describe(self) -> str:
+        output_desc = "accumulator/unquantized" if self.output_bit_width is None else f"int{self.output_bit_width}"
+        return (
+            f"input=int{self.input_bit_width}, "
+            f"weight=int{self.weight_bit_width}, "
+            f"hidden_act=uint{self.act_bit_width}, "
+            f"output={output_desc}"
+        )
+
+
+def _validate_bit_width(name: str, value: int | None, allow_none: bool = False) -> None:
+    if value is None:
+        if allow_none:
+            return
+        raise ValueError(f"{name} cannot be None")
+    if value < 1 or value > 32:
+        raise ValueError(f"{name} must be in [1, 32], got {value}")
+
+
+class BranchMLPQuant(nn.Module):
     """
     FINN-friendly branch:
       signed input quant -> QuantLinear -> Uint8 QuantReLU -> QuantLinear -> Uint8 QuantReLU -> QuantLinear
@@ -24,38 +52,44 @@ class BranchMLPInt8(nn.Module):
     Output: [B, 2P]
     """
 
-    def __init__(self, in_dim: int, hidden: int, out_dim: int):
+    def __init__(self, in_dim: int, hidden: int, out_dim: int, quant_cfg: QuantConfig):
         super().__init__()
         self.input_quant = QuantIdentity(
             act_quant=Int8ActPerTensorFloat,
+            bit_width=quant_cfg.input_bit_width,
             return_quant_tensor=True,
         )
         self.fc1 = QuantLinear(
             in_dim,
             hidden,
             weight_quant=Int8WeightPerTensorFloat,
+            weight_bit_width=quant_cfg.weight_bit_width,
             bias=True,
             return_quant_tensor=True,
         )
         self.act1 = QuantReLU(
             act_quant=Uint8ActPerTensorFloat,
+            bit_width=quant_cfg.act_bit_width,
             return_quant_tensor=True,
         )
         self.fc2 = QuantLinear(
             hidden,
             hidden,
             weight_quant=Int8WeightPerTensorFloat,
+            weight_bit_width=quant_cfg.weight_bit_width,
             bias=True,
             return_quant_tensor=True,
         )
         self.act2 = QuantReLU(
             act_quant=Uint8ActPerTensorFloat,
+            bit_width=quant_cfg.act_bit_width,
             return_quant_tensor=True,
         )
         self.fc3 = QuantLinear(
             hidden,
             out_dim,
             weight_quant=Int8WeightPerTensorFloat,
+            weight_bit_width=quant_cfg.weight_bit_width,
             bias=True,
             return_quant_tensor=True,
         )
@@ -68,48 +102,59 @@ class BranchMLPInt8(nn.Module):
         return x
 
 
-class DeepONetFinnDeployInt8(nn.Module):
+class DeepONetFinnDeployQuant(nn.Module):
     """
     Full deploy model for FINN:
-      u_in -> BranchMLPInt8 -> b(2P) -> 2 fixed-weight QuantLinear layers -> packed [B, 2, N_t]
+      u_in -> BranchMLPQuant -> b(2P) -> 1 fixed-weight QuantLinear layer -> [B, 2*N_t]
+
+    Output layout:
+      out[:, :N_t]  = real(A(L,t))
+      out[:, N_t:]  = imag(A(L,t))
     """
 
-    def __init__(self, M_real: torch.Tensor, M_imag: torch.Tensor, hidden: int):
+    def __init__(self, M_real: torch.Tensor, M_imag: torch.Tensor, hidden: int, quant_cfg: QuantConfig):
         super().__init__()
         assert M_real.shape == M_imag.shape
         n_t, two_p = M_real.shape
         self.n_t = n_t
         self.two_p = two_p
+        self.quant_cfg = quant_cfg
 
-        self.branch = BranchMLPInt8(in_dim=2 * pm.N_t, hidden=hidden, out_dim=two_p)
+        self.branch = BranchMLPQuant(
+            in_dim=2 * pm.N_t,
+            hidden=hidden,
+            out_dim=two_p,
+            quant_cfg=quant_cfg,
+        )
 
-        self.real_fc = QuantLinear(
+        self.out_fc = QuantLinear(
             two_p,
-            n_t,
+            2 * n_t,
             weight_quant=Int8WeightPerTensorFloat,
+            weight_bit_width=quant_cfg.weight_bit_width,
             bias=False,
         )
-        self.imag_fc = QuantLinear(
-            two_p,
-            n_t,
-            weight_quant=Int8WeightPerTensorFloat,
-            bias=False,
-        )
+        self.output_quant = None
+        if quant_cfg.output_bit_width is not None:
+            self.output_quant = QuantIdentity(
+                act_quant=Int8ActPerTensorFloat,
+                bit_width=quant_cfg.output_bit_width,
+                return_quant_tensor=False,
+            )
 
         with torch.no_grad():
-            self.real_fc.weight.copy_(M_real)
-            self.imag_fc.weight.copy_(M_imag)
+            # Keep a single 512-wide output stream for FINN driver generation.
+            self.out_fc.weight.copy_(torch.cat([M_real, M_imag], dim=0))
 
-        for param in self.real_fc.parameters():
-            param.requires_grad = False
-        for param in self.imag_fc.parameters():
+        for param in self.out_fc.parameters():
             param.requires_grad = False
 
     def forward(self, u_in):
         branch_out = self.branch(u_in)
-        real = self.real_fc(branch_out)
-        imag = self.imag_fc(branch_out)
-        return torch.stack([real, imag], dim=1)
+        out = self.out_fc(branch_out)
+        if self.output_quant is not None:
+            out = self.output_quant(out)
+        return out
 
 
 def crop_targets(AL_clean_batch: torch.Tensor, n_t_out: int, time_indices: torch.Tensor | None):
@@ -190,8 +235,23 @@ def main(
     dataset_samples: int,
     force_rebuild_cache: bool,
     hidden: int,
+    input_bit_width: int,
+    weight_bit_width: int,
+    act_bit_width: int,
+    output_bit_width: int | None,
 ):
+    _validate_bit_width("input_bit_width", input_bit_width)
+    _validate_bit_width("weight_bit_width", weight_bit_width)
+    _validate_bit_width("act_bit_width", act_bit_width)
+    _validate_bit_width("output_bit_width", output_bit_width, allow_none=True)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    quant_cfg = QuantConfig(
+        input_bit_width=input_bit_width,
+        weight_bit_width=weight_bit_width,
+        act_bit_width=act_bit_width,
+        output_bit_width=output_bit_width,
+    )
 
     data = np.load(mat)
     M_real = torch.from_numpy(data["M_real"]).float().to(device)
@@ -201,7 +261,18 @@ def main(
         time_indices = torch.from_numpy(data["time_indices"]).long().to(device)
     n_t_out = int(M_real.shape[0])
 
-    model = DeepONetFinnDeployInt8(M_real=M_real, M_imag=M_imag, hidden=hidden).to(device)
+    print(f"[INFO] Quantization config: {quant_cfg.describe()}")
+    if output_bit_width is None:
+        print("[INFO] Output tensor is left unquantized, so exported output dtype may stay wide (e.g. accumulator INT24).")
+    else:
+        print(f"[INFO] Final output is explicitly quantized to signed INT{output_bit_width}.")
+
+    model = DeepONetFinnDeployQuant(
+        M_real=M_real,
+        M_imag=M_imag,
+        hidden=hidden,
+        quant_cfg=quant_cfg,
+    ).to(device)
     model.train()
 
     A0, AL_clean, _ = load_supervised_dataset(
@@ -218,8 +289,8 @@ def main(
             idx = perm[i : i + 32]
             u_in, y_r, y_i = make_supervised_batch(A0[idx], AL_clean[idx], n_t_out, time_indices)
             pred = model(u_in)
-            pred_r = pred[:, 0, :]
-            pred_i = pred[:, 1, :]
+            pred_r = pred[:, :n_t_out]
+            pred_i = pred[:, n_t_out : 2 * n_t_out]
             loss = ((pred_r - y_r) ** 2 + (pred_i - y_i) ** 2).mean()
 
             opt.zero_grad(set_to_none=True)
@@ -241,6 +312,15 @@ if __name__ == "__main__":
     ap.add_argument("--dataset_samples", type=int, default=256)
     ap.add_argument("--force_rebuild_cache", action="store_true")
     ap.add_argument("--hidden", type=int, default=pm.branch_hidden)
+    ap.add_argument("--input_bit_width", type=int, default=8)
+    ap.add_argument("--weight_bit_width", type=int, default=8)
+    ap.add_argument("--act_bit_width", type=int, default=8)
+    ap.add_argument(
+        "--output_bit_width",
+        type=int,
+        default=None,
+        help="Optional signed output bit width. Set this if you want the exported graph output dtype to be smaller.",
+    )
     args = ap.parse_args()
     main(
         args.mat,
@@ -250,4 +330,8 @@ if __name__ == "__main__":
         args.dataset_samples,
         args.force_rebuild_cache,
         args.hidden,
+        args.input_bit_width,
+        args.weight_bit_width,
+        args.act_bit_width,
+        args.output_bit_width,
     )
