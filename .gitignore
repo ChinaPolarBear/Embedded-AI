@@ -30,7 +30,7 @@ figures/
 *.onnx
 *.npz
 *.npy
-
+*.bin
 # Verification outputs
 verification_io/
 verification_io_*/

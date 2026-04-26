@@ -43,10 +43,15 @@ input.bin
 
 source ~/finn_runtime_env/bin/activate
 
-第 0 步：如果需要重新切 shell，可按你机器当前有效的 shell 路径执行
+第 0 步：如果需要切到board生成output所需的 shell，可按你机器当前有效的 shell 路径执行
 
 sudo /opt/xilinx/xrt/bin/xbmgmt program --device 65:00.0 --shell /lib/firmware/xilinx/12c8fafb0632499db1c0c6676271b8a6/partition.xsabin
 sudo /opt/xilinx/xrt/bin/xbutil examine
+
+如果需要切回到跑dataflow需要的shell
+sudo /opt/xilinx/xrt/bin/xbmgmt program --device 65:00.0 --shell /lib/firmware/xilinx/f8dac62e49d9b0aae9fc6f260d9d0dfb/partition.xsabin
+sudo /opt/xilinx/xrt/bin/xbutil examine
+
 
 第 1 步：确认 input.bin 大小
 
