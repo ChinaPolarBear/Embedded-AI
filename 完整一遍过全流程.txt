@@ -1,0 +1,83 @@
+0. 切换shell（切换前需要重启电脑）
+
+如果需要切到board生成output所需的 shell
+sudo /opt/xilinx/xrt/bin/xbmgmt program --device 65:00.0 --shell /lib/firmware/xilinx/12c8fafb0632499db1c0c6676271b8a6/partition.xsabin
+sudo /opt/xilinx/xrt/bin/xbutil examine
+
+如果需要切回到跑dataflow需要的shell
+sudo /opt/xilinx/xrt/bin/xbmgmt program --device 65:00.0 --shell /lib/firmware/xilinx/f8dac62e49d9b0aae9fc6f260d9d0dfb/partition.xsabin
+sudo /opt/xilinx/xrt/bin/xbutil examine
+
+
+1.先跑一遍quicktest，然后进入docker
+
+cd ~
+mkdir -p ~/finn_tmp
+
+cd ~
+git clone https://github.com/Xilinx/finn.git
+
+cd ~/finn
+
+export FINN_BUILD_DIR=~/finn_tmp
+export FINN_HOST_BUILD_DIR=~/finn_tmp
+
+docker version
+docker ps
+
+./run-docker.sh quicktest
+
+
+2.进入docker就可以运行python文件了
+
+cd ~/finn
+export FINN_BUILD_DIR=~/finn_tmp
+./run-docker.sh
+
+
+3.zip压缩包放到my_build文件夹中然后解压，解压后会看到三个文件，deeponet_u250_int4_qonnx.onnx,finn_qonnx_utils.py,step4_convert_qonnx_to_finn.py
+运行以下代码，完成后会生成deeponet_u250_int4_qonnx_finn.onnx，将其更名为model.onnx,记得把旧的model.onnx删掉！！！！
+
+python step4_convert_qonnx_to_finn.py --qonnx_in deeponet_u250_int4_qonnx.onnx
+
+
+4.接下来就开始build dataflow,先检查环境
+
+cd /home/xband/finn/my_build
+
+export FINN_XILINX_PATH=/opt/Xilinx
+export FINN_XILINX_VERSION=2022.2
+export VIVADO_PATH=/opt/Xilinx/Vivado/2022.2
+export VITIS_PATH=/opt/Xilinx/Vitis/2022.2
+export HLS_PATH=/opt/Xilinx/Vitis_HLS/2022.2
+export PLATFORM_REPO_PATHS=/opt/xilinx/platforms
+#export NUM_DEFAULT_WORKERS=1 (add it if the system is shutted down)
+
+source /opt/Xilinx/Vivado/2022.2/settings64.sh
+source /opt/Xilinx/Vitis/2022.2/settings64.sh
+source /opt/Xilinx/Vitis_HLS/2022.2/settings64.sh
+
+
+5.开始run my_build这一步会花费大概两个半小时祝你们好运
+
+cd ~/finn
+
+mkdir -p ~/finn_tmp
+
+unset FINN_BUILD_DIR
+unset FINN_HOST_BUILD_DIR
+
+export FINN_BUILD_DIR=/home/xband/finn_tmp
+export FINN_HOST_BUILD_DIR=/home/xband/finn_tmp
+
+echo $FINN_BUILD_DIR
+echo $FINN_HOST_BUILD_DIR
+
+./run-docker.sh build_dataflow /home/xband/finn/my_build
+
+
+6.测试模型前检查driver.py（/home/xband/finn/my_build/output_u250_bitfile/deploy/driver/driver.py）文件确保shape和预想的对的上
+
+测试代码请移步 
+板端生成output代码.txt
+
