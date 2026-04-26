@@ -2,14 +2,14 @@
 Decode the current board-facing single-output `output.bin`.
 
 This helper targets the deploy package interface we observed in the generated driver:
-  - output normal shape: (1, 256), laid out as [real128, imag128]
+  - output normal shape: (1, N_scalar), laid out as [realN_probe, imagN_probe]
   - output datatype    : usually INT16 for the current low-bit build
 
 Typical usage:
     python board_decode_output_bin.py ^
         --input_bin output.bin ^
-        --out_npy output_1x256_raw.npy ^
-        --length 256 ^
+        --out_npy output_1x64_raw.npy ^
+        --length 64 ^
         --datatype INT16
 
 Supported raw sizes:
@@ -25,7 +25,7 @@ from pathlib import Path
 import numpy as np
 
 
-DEFAULT_OUTPUT_LENGTH = 256
+DEFAULT_OUTPUT_LENGTH = 64
 BYTES_PER_INT24 = 3
 
 
@@ -93,7 +93,7 @@ def _select_payload(raw: np.ndarray, half: str, trace_bytes: int) -> tuple[np.nd
         return second, f"auto_second_half nonzero={second_nz}"
 
     raise ValueError(
-        "Found a 1536-byte payload but could not auto-select a unique active half. "
+        "Found a double-trace payload but could not auto-select a unique active half. "
         f"first_half_nonzero={first_nz}, second_half_nonzero={second_nz}. "
         "Re-run with --half first or --half second."
     )
@@ -147,7 +147,7 @@ def main(
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--input_bin", type=str, default="output.bin")
-    ap.add_argument("--out_npy", type=str, default="output_1x256_raw.npy")
+    ap.add_argument("--out_npy", type=str, default="output_1x64_raw.npy")
     ap.add_argument(
         "--out_txt",
         type=str,
@@ -172,7 +172,7 @@ if __name__ == "__main__":
         "--length",
         type=int,
         default=DEFAULT_OUTPUT_LENGTH,
-        help="Number of scalar output elements in oshape_normal, e.g. 256 for the compact complex probe build.",
+        help="Number of scalar output elements in oshape_normal, e.g. 64 for the compact complex probe build.",
     )
     args = ap.parse_args()
     main(

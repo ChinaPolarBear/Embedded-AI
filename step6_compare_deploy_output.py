@@ -7,7 +7,7 @@ Typical usage:
         --actual board_output.npy
 
 Expected `board_output.npy` formats:
-  - [B, 256] compact-complex probe output: first 128 real, last 128 imag
+  - [B, 2*N_probe] compact-complex probe output: first N_probe real, last N_probe imag
   - [B, N_t] legacy real-channel probe output
   - [B, 1, N_t] legacy real-channel probe output
   - [B, 2, N_t]

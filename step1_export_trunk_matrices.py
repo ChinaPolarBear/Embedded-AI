@@ -32,6 +32,17 @@ def select_time_indices(n_t_out: int, mode: str) -> torch.Tensor:
         start = 0
     elif mode == "end":
         start = pm.N_t - n_t_out
+    elif mode == "uniform":
+        if pm.N_t % n_t_out == 0:
+            step = pm.N_t // n_t_out
+            return torch.arange(0, pm.N_t, step, dtype=torch.long)[:n_t_out]
+
+        indices = torch.round(torch.linspace(0, pm.N_t - 1, steps=n_t_out)).long()
+        if torch.unique_consecutive(indices).numel() != n_t_out:
+            raise ValueError(
+                f"Could not build {n_t_out} unique uniformly spaced indices from N_t={pm.N_t}"
+            )
+        return indices
     else:
         start = (pm.N_t - n_t_out) // 2
 
@@ -94,6 +105,11 @@ if __name__ == "__main__":
     ap.add_argument("--out", type=str, default="trunk_matrices.npz")
     ap.add_argument("--n_t_out", type=int, default=pm.N_t)
     ap.add_argument("--p_dim_out", type=int, default=pm.P_dim)
-    ap.add_argument("--time_slice", type=str, default="center", choices=["center", "start", "end"])
+    ap.add_argument(
+        "--time_slice",
+        type=str,
+        default="center",
+        choices=["center", "start", "end", "uniform"],
+    )
     args = ap.parse_args()
     main(args.ckpt, args.out, args.n_t_out, args.p_dim_out, args.time_slice)

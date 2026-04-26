@@ -4,27 +4,27 @@
 
 新的模型输出约定：
 
-output shape = (1, 256)
-output[0, 0:128] = real(A(L,t_probe))
-output[0, 128:256] = imag(A(L,t_probe))
+output shape = (1, 64)
+output[0, 0:32] = real(A(L,t_probe))
+output[0, 32:64] = imag(A(L,t_probe))
 
 重新跑 FINN build_dataflow 后，请先打开新的 deploy/driver/driver.py 确认：
 
 idt = INT4
-ishape_normal = (1, 256)
-oshape_normal = (1, 256)
+ishape_normal = (1, 64)
+oshape_normal = (1, 64)
 
 如果 driver.py 里显示：
 
 odt = INT16
-oshape_packed = (1, 256, 2)
+oshape_packed = (1, 64, 2)
 
 那么：
 
-input.bin 预期大小 = 1 * 256 * 1 = 256 bytes
-output.bin 预期大小 = 1 * 256 * 2 = 512 bytes
-output.npy 解码后 shape = (1, 256)
-input/output 的 256 个标量都是 compact complex 布局：前 128 real，后 128 imag。
+input.bin 预期大小 = 1 * 64 * 1 = 64 bytes
+output.bin 预期大小 = 1 * 64 * 2 = 128 bytes
+output.npy 解码后 shape = (1, 64)
+input/output 的 64 个标量都是 compact complex 布局：前 32 real，后 32 imag。
 
 如果你的新 driver.py 里 odt 不是 INT16，请以 driver.py 里的 odt 和 oshape_packed 为准。下面的 C++ 和 Python 解码代码默认按 INT16 写。
 
@@ -65,8 +65,8 @@ if not p.is_file():
 
 size = p.stat().st_size
 print("input.bin bytes:", size)
-if size != 256:
-    raise RuntimeError(f"Expected input.bin to be 256 bytes for INT4 packed input, got {size}")
+if size != 64:
+    raise RuntimeError(f"Expected input.bin to be 64 bytes for INT4 packed input, got {size}")
 print("input.bin size check passed")
 PY
 
@@ -113,8 +113,8 @@ int main() {
         const std::string input_path = "input.bin";
         const std::string output_path = "output.bin";
 
-        const size_t input_bytes = 1 * 256 * 1;
-        const size_t output_elems = 1 * 256;
+        const size_t input_bytes = 1 * 64 * 1;
+        const size_t output_elems = 1 * 64;
         const size_t bytes_per_output_elem = 2;
         const size_t output_bytes = output_elems * bytes_per_output_elem;
         const uint32_t numReps = 1;
@@ -184,8 +184,8 @@ int main() {
 
         std::cout << "Done. Output saved to " << output_path << std::endl;
         std::cout << "Expected input bytes: " << input_bytes << std::endl;
-        std::cout << "Expected output tensor shape: (1, 256)" << std::endl;
-        std::cout << "Expected output layout: first 128 real, last 128 imag" << std::endl;
+        std::cout << "Expected output tensor shape: (1, 64)" << std::endl;
+        std::cout << "Expected output layout: first 32 real, last 32 imag" << std::endl;
         std::cout << "Expected output datatype: INT16" << std::endl;
         std::cout << "Expected output bytes: " << output_bytes << std::endl;
         return 0;
@@ -207,7 +207,7 @@ cd /home/xband/finn/my_build/output_u250_bitfile/deploy/driver
 source /opt/xilinx/xrt/setup.sh
 ./run_finn_xrt
 
-第 5 步：快速检查 output.bin，并按 (1,256) 解码
+第 5 步：快速检查 output.bin，并按 (1,64) 解码
 
 cd /home/xband/finn/my_build/output_u250_bitfile/deploy/driver
 python3 - <<'PY'
@@ -220,22 +220,22 @@ if not p.is_file():
 
 raw = np.fromfile("output.bin", dtype=np.uint8)
 print("raw bytes:", raw.size)
-if raw.size != 512:
-    raise RuntimeError(f"Expected 512 bytes for INT16 (1,256), got {raw.size}")
+if raw.size != 128:
+    raise RuntimeError(f"Expected 128 bytes for INT16 (1,64), got {raw.size}")
 
-y_raw = np.fromfile("output.bin", dtype="<i2").astype(np.int32).reshape(1, 256)
-np.save("output_raw_int16_1x256.npy", y_raw)
+y_raw = np.fromfile("output.bin", dtype="<i2").astype(np.int32).reshape(1, 64)
+np.save("output_raw_int16_1x64.npy", y_raw)
 np.save("output.npy", y_raw.astype(np.float32))
 
-print("Saved output_raw_int16_1x256.npy")
+print("Saved output_raw_int16_1x64.npy")
 print("Saved output.npy")
 print("output_raw shape:", y_raw.shape)
 print("output_raw dtype:", y_raw.dtype)
 print("output_raw min/max:", y_raw.min(), y_raw.max())
 print("real first 20:", y_raw[0, :20])
-print("imag first 20:", y_raw[0, 128:148])
-print("real nonzero:", np.count_nonzero(y_raw[0, :128]))
-print("imag nonzero:", np.count_nonzero(y_raw[0, 128:]))
+print("imag first 20:", y_raw[0, 32:52])
+print("real nonzero:", np.count_nonzero(y_raw[0, :32]))
+print("imag nonzero:", np.count_nonzero(y_raw[0, 32:]))
 PY
 
 第 6 步：把 output.bin 发回本地
@@ -243,7 +243,7 @@ PY
 这次优先把 output.bin 发回给我。
 如果方便，也可以一起发：
 
-output_raw_int16_1x256.npy
+output_raw_int16_1x64.npy
 output.npy
 
-我会在本地按 (1,256) 的 compact complex 结构重新解码和验证。
+我会在本地按 (1,64) 的 compact complex 结构重新解码和验证。

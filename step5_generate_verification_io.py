@@ -19,9 +19,9 @@ This script:
 
 Notes:
   - `input.npy` is the compact float32 complex input expected by the exported probe model:
-    first 128 values are real(A(0,t_probe)), last 128 values are imag(A(0,t_probe)).
+    first N_probe values are real(A(0,t_probe)), last N_probe values are imag(A(0,t_probe)).
   - `ssfm_output_probe.npy` matches the compact deploy output layout:
-    first 128 values are real(A(L,t_probe)), last 128 values are imag(A(L,t_probe)).
+    first N_probe values are real(A(L,t_probe)), last N_probe values are imag(A(L,t_probe)).
   - If your board runtime later expects a quantized/raw format, keep this script as the
     source of truth for the waveform and add the board-specific conversion in the host code.
 """
@@ -114,18 +114,34 @@ def _complex_to_two_channel(x: torch.Tensor) -> np.ndarray:
     return np.stack([x_np.real.astype(np.float32), x_np.imag.astype(np.float32)], axis=0)
 
 
-def _probe_indices() -> torch.Tensor:
-    return torch.arange(0, pm.N_t, 2)[: pm.N_t // 2].long()
+def _load_probe_indices(mat_path: str) -> torch.Tensor:
+    data = np.load(mat_path)
+    if "time_indices" in data.files:
+        indices = np.asarray(data["time_indices"], dtype=np.int64).reshape(-1)
+        if indices.size == 0:
+            raise ValueError(f"time_indices in {mat_path} is empty")
+        return torch.from_numpy(indices).long()
+
+    if "M_real" in data.files:
+        n_t_out = int(np.asarray(data["M_real"]).shape[0])
+        if n_t_out == pm.N_t:
+            return torch.arange(pm.N_t).long()
+        raise ValueError(
+            f"{mat_path} is missing time_indices, so probe positions for n_t_out={n_t_out} are ambiguous"
+        )
+
+    raise ValueError(f"{mat_path} does not contain M_real/time_indices needed for deploy probing")
 
 
-def main(out_dir: str, source: str, sample_index: int, seed: int | None) -> None:
+def main(out_dir: str, source: str, sample_index: int, seed: int | None, mat: str) -> None:
     _set_seed(seed)
 
     out_dir_path = Path(out_dir).resolve()
     out_dir_path.mkdir(parents=True, exist_ok=True)
 
     A0, AL_clean, source_desc = _select_sample(source, sample_index)
-    probe_indices = _probe_indices()
+    probe_indices = _load_probe_indices(mat)
+    n_probe = int(probe_indices.numel())
 
     with torch.no_grad():
         A0_probe = A0[probe_indices]
@@ -151,9 +167,9 @@ def main(out_dir: str, source: str, sample_index: int, seed: int | None) -> None
         source=np.array([source_desc]),
         sample_index=np.array([sample_index], dtype=np.int32),
         seed=np.array([-1 if seed is None else seed], dtype=np.int64),
-        input_format=np.array(["compact_real128_imag128_float32"]),
+        input_format=np.array([f"compact_real{n_probe}_imag{n_probe}_float32"]),
         output_format=np.array(["two_channel_real_imag_float32"]),
-        deploy_output_format=np.array(["compact_real128_imag128_float32"]),
+        deploy_output_format=np.array([f"compact_real{n_probe}_imag{n_probe}_float32"]),
         t_grid=t_grid,
         deploy_t_grid=probe_t_grid,
         propagation_distance=np.array([pm.L], dtype=np.float32),
@@ -171,6 +187,7 @@ def main(out_dir: str, source: str, sample_index: int, seed: int | None) -> None
     print(f"[OK] Generated verification tensors in: {out_dir_path}")
     print(f"     source        : {source_desc}")
     print(f"     seed          : {seed if seed is not None else 'none'}")
+    print(f"     probe points  : {n_probe} complex samples")
     print(f"     input.npy     : shape={tuple(u_in.shape)} dtype={u_in.dtype}")
     print(f"     ssfm_output   : shape={tuple(ssfm_output.shape)} dtype={ssfm_output.dtype}")
     print(f"     ssfm_probe    : shape={tuple(ssfm_output_probe.shape)} dtype={ssfm_output_probe.dtype}")
@@ -189,10 +206,17 @@ if __name__ == "__main__":
         default=None,
         help="Optional random seed. Only affects --source random.",
     )
+    ap.add_argument(
+        "--mat",
+        type=str,
+        default="trunk_matrices.npz",
+        help="Deploy trunk matrix file used to recover the exact time_indices for the board probe.",
+    )
     args = ap.parse_args()
     main(
         out_dir=args.out_dir,
         source=args.source,
         sample_index=args.sample_index,
         seed=args.seed,
+        mat=args.mat,
     )

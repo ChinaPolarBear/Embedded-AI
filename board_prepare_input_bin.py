@@ -2,7 +2,7 @@
 Prepare the current board-facing signed integer `input.bin` from `input.npy`.
 
 This helper targets the deploy package interface we already observed on the board:
-  - input normal shape: (1, 256), laid out as [real128, imag128]
+  - input normal shape: (1, N_scalar), laid out as [realN_probe, imagN_probe]
   - input datatype    : INT4 for the current low-bit build
 
 Typical usage:
@@ -29,6 +29,32 @@ import numpy as np
 DEFAULT_INPUT_SCALE = 0.22732384502887726
 DEFAULT_ZERO_POINT = 0.0
 DEFAULT_BIT_WIDTH = 4
+
+
+def _load_input_length_from_model(model_path: Path) -> int | None:
+    try:
+        import onnx
+    except ModuleNotFoundError:
+        return None
+
+    if not model_path.is_file():
+        return None
+
+    model = onnx.load(str(model_path))
+    if not model.graph.input:
+        return None
+
+    dims = model.graph.input[0].type.tensor_type.shape.dim
+    shape = []
+    for dim in dims:
+        if dim.HasField("dim_value"):
+            shape.append(int(dim.dim_value))
+        else:
+            return None
+
+    if len(shape) != 2 or shape[0] != 1:
+        return None
+    return shape[1]
 
 
 def _load_quant_params_from_model(model_path: Path) -> tuple[float, float, int] | None:
@@ -117,9 +143,14 @@ def main(input_npy: str, out_bin: str, out_npy: str | None, model: str | None, s
 
     arr = np.load(input_path)
     arr = np.asarray(arr, dtype=np.float32)
-    if arr.shape != (1, 256):
+    if arr.ndim != 2 or arr.shape[0] != 1:
         raise ValueError(
-            f"Expected input.npy shape (1, 256) for the current board interface, got {arr.shape}"
+            f"Expected input.npy shape (1, N_scalar) for the current board interface, got {arr.shape}"
+        )
+    expected_input_len = _load_input_length_from_model(model_path) if model_path is not None else None
+    if expected_input_len is not None and arr.shape[1] != expected_input_len:
+        raise ValueError(
+            f"Expected input.npy shape (1, {expected_input_len}) from model {model_path}, got {arr.shape}"
         )
 
     q_scale, q_zero, q_bw, scale_source = _resolve_quant_params(model_path, scale)
@@ -150,7 +181,8 @@ def main(input_npy: str, out_bin: str, out_npy: str | None, model: str | None, s
     print(f"int{q_bw} range             : [{q_arr.min()}, {q_arr.max()}]")
     print(f"saturation count        : min={sat_min}, max={sat_max}")
     print(
-        "board contract          : input.bin now contains exactly 256 signed integer values "
+        "board contract          : input.bin now contains exactly "
+        f"{arr.shape[1]} signed integer values "
         f"for an INT{q_bw} FINN input"
     )
 
