@@ -16,6 +16,7 @@ This script:
        - ssfm_output.npy
        - ssfm_output_probe.npy
        - verification_case.npz
+       - optional board-ready input binaries in a separate input/ folder
 
 Notes:
   - `input.npy` is the compact float32 complex input expected by the exported probe model:
@@ -23,19 +24,165 @@ Notes:
   - `ssfm_output_probe.npy` matches the compact deploy output layout:
     first N_probe values are real(A(L,t_probe)), last N_probe values are imag(A(L,t_probe)).
   - If your board runtime later expects a quantized/raw format, keep this script as the
-    source of truth for the waveform and add the board-specific conversion in the host code.
+    source of truth for the waveform. This script can now also emit board-ready `input.bin`
+    files using the same quantization path internally.
 """
-# python step5_generate_verification_io.py --out_dir verification_io --source random --seed 123
+# python step5_generate_verification_io.py --out_dir verification_io --source random --seed 123 --mat trunk_matrices.npz --input_dir input --num_inputs 2 --model deeponet_u250_int4_qonnx.onnx
 
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
 import torch
 
 import pinn_physics_model as pm
+
+
+DEFAULT_INPUT_SCALE = 0.22732384502887726
+DEFAULT_ZERO_POINT = 0.0
+DEFAULT_BIT_WIDTH = 4
+
+
+def _load_input_length_from_model(model_path: Path) -> int | None:
+    try:
+        import onnx
+    except ModuleNotFoundError:
+        return None
+
+    if not model_path.is_file():
+        return None
+
+    model = onnx.load(str(model_path))
+    if not model.graph.input:
+        return None
+
+    dims = model.graph.input[0].type.tensor_type.shape.dim
+    shape = []
+    for dim in dims:
+        if dim.HasField("dim_value"):
+            shape.append(int(dim.dim_value))
+        else:
+            return None
+
+    if len(shape) != 2 or shape[0] != 1:
+        return None
+    return shape[1]
+
+
+def _load_quant_params_from_model(model_path: Path) -> tuple[float, float, int] | None:
+    try:
+        import onnx
+        from onnx import numpy_helper
+    except ModuleNotFoundError:
+        return None
+
+    if not model_path.is_file():
+        return None
+
+    model = onnx.load(str(model_path))
+    if not model.graph.input:
+        return None
+
+    graph_input_name = model.graph.input[0].name
+    value_map = {init.name: numpy_helper.to_array(init) for init in model.graph.initializer}
+    for node in model.graph.node:
+        if node.op_type != "Constant" or not node.output:
+            continue
+        for attr in node.attribute:
+            if attr.name == "value":
+                value_map[node.output[0]] = numpy_helper.to_array(attr.t)
+                break
+
+    for node in model.graph.node:
+        if node.op_type != "Quant":
+            continue
+        if not node.input or node.input[0] != graph_input_name:
+            continue
+        if len(node.input) < 4:
+            return None
+
+        scale_name = node.input[1]
+        zero_name = node.input[2]
+        bit_width_name = node.input[3]
+        if scale_name not in value_map or zero_name not in value_map or bit_width_name not in value_map:
+            return None
+
+        scale = float(np.asarray(value_map[scale_name]).reshape(()))
+        zero_point = float(np.asarray(value_map[zero_name]).reshape(()))
+        bit_width = int(round(float(np.asarray(value_map[bit_width_name]).reshape(()))))
+        return scale, zero_point, bit_width
+
+    return None
+
+
+def _resolve_quant_params(model_path: Path | None, scale: float | None) -> tuple[float, float, int, str]:
+    if scale is not None:
+        return float(scale), DEFAULT_ZERO_POINT, DEFAULT_BIT_WIDTH, "cli_override"
+
+    if model_path is not None:
+        model_params = _load_quant_params_from_model(model_path)
+        if model_params is not None:
+            q_scale, q_zero, q_bw = model_params
+            return q_scale, q_zero, q_bw, f"model:{model_path}"
+
+    return DEFAULT_INPUT_SCALE, DEFAULT_ZERO_POINT, DEFAULT_BIT_WIDTH, "built_in_default"
+
+
+def _quantize_signed(arr: np.ndarray, scale: float, zero_point: float, bit_width: int) -> np.ndarray:
+    if bit_width < 1 or bit_width > 8:
+        raise ValueError(f"This helper expects a signed input bit width in [1, 8], got {bit_width}")
+    if abs(zero_point) > 1e-9:
+        raise ValueError(f"This helper expects zero_point=0 for signed integer input, got {zero_point}")
+    if scale <= 0:
+        raise ValueError(f"scale must be positive, got {scale}")
+
+    qmin = -(2 ** (bit_width - 1))
+    qmax = (2 ** (bit_width - 1)) - 1
+    quant = np.rint(arr / scale).astype(np.int32)
+    quant = np.clip(quant, qmin, qmax).astype(np.int8)
+    return quant
+
+
+def prepare_board_input_array(
+    arr: np.ndarray,
+    model_path: Path | None = None,
+    scale: float | None = None,
+) -> tuple[np.ndarray, dict[str, float | int | str | tuple[int, ...]]]:
+    arr = np.asarray(arr, dtype=np.float32)
+    if arr.ndim != 2 or arr.shape[0] != 1:
+        raise ValueError(
+            f"Expected input.npy shape (1, N_scalar) for the current board interface, got {arr.shape}"
+        )
+
+    expected_input_len = _load_input_length_from_model(model_path) if model_path is not None else None
+    if expected_input_len is not None and arr.shape[1] != expected_input_len:
+        raise ValueError(
+            f"Expected input.npy shape (1, {expected_input_len}) from model {model_path}, got {arr.shape}"
+        )
+
+    q_scale, q_zero, q_bw, scale_source = _resolve_quant_params(model_path, scale)
+    q_arr = _quantize_signed(arr, q_scale, q_zero, q_bw)
+
+    qmin = -(2 ** (q_bw - 1))
+    qmax = (2 ** (q_bw - 1)) - 1
+    meta: dict[str, float | int | str | tuple[int, ...]] = {
+        "input_shape": tuple(arr.shape),
+        "quantized_shape": tuple(q_arr.shape),
+        "scale_source": scale_source,
+        "scale": q_scale,
+        "zero_point": q_zero,
+        "bit_width": q_bw,
+        "float_min": float(arr.min()),
+        "float_max": float(arr.max()),
+        "int_min": int(q_arr.min()),
+        "int_max": int(q_arr.max()),
+        "sat_min_count": int(np.count_nonzero(q_arr == qmin)),
+        "sat_max_count": int(np.count_nonzero(q_arr == qmax)),
+    }
+    return q_arr, meta
 
 
 def _set_seed(seed: int | None) -> None:
@@ -133,16 +280,11 @@ def _load_probe_indices(mat_path: str) -> torch.Tensor:
     raise ValueError(f"{mat_path} does not contain M_real/time_indices needed for deploy probing")
 
 
-def main(out_dir: str, source: str, sample_index: int, seed: int | None, mat: str) -> None:
-    _set_seed(seed)
-
-    out_dir_path = Path(out_dir).resolve()
-    out_dir_path.mkdir(parents=True, exist_ok=True)
-
-    A0, AL_clean, source_desc = _select_sample(source, sample_index)
-    probe_indices = _load_probe_indices(mat)
-    n_probe = int(probe_indices.numel())
-
+def _build_deploy_views(
+    A0: torch.Tensor,
+    AL_clean: torch.Tensor,
+    probe_indices: torch.Tensor,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     with torch.no_grad():
         A0_probe = A0[probe_indices]
         u_in_t = torch.cat([A0_probe.real, A0_probe.imag], dim=0).unsqueeze(0).float()
@@ -158,6 +300,74 @@ def main(out_dir: str, source: str, sample_index: int, seed: int | None, mat: st
     )[None, :]
     t_grid = pm.t_grid.detach().cpu().numpy().astype(np.float32)
     probe_t_grid = t_grid[probe_indices.detach().cpu().numpy()]
+    return u_in, ssfm_output, ssfm_output_probe, t_grid, probe_t_grid
+
+
+def _save_board_input_set(
+    input_dir_path: Path,
+    stem: str,
+    u_in: np.ndarray,
+    model_path: Path | None,
+    scale: float | None,
+) -> dict[str, object]:
+    q_arr, quant_meta = prepare_board_input_array(u_in, model_path=model_path, scale=scale)
+    bit_width = int(quant_meta["bit_width"])
+
+    float_path = input_dir_path / f"{stem}.npy"
+    bin_path = input_dir_path / f"{stem}.bin"
+    quant_path = input_dir_path / f"{stem}_int{bit_width}.npy"
+
+    np.save(float_path, u_in)
+    np.save(quant_path, q_arr)
+    q_arr.reshape(-1).tofile(bin_path)
+
+    entry: dict[str, object] = {
+        "stem": stem,
+        "float_npy": float_path.name,
+        "quant_npy": quant_path.name,
+        "bin": bin_path.name,
+        "scale_source": str(quant_meta["scale_source"]),
+        "scale": float(quant_meta["scale"]),
+        "zero_point": float(quant_meta["zero_point"]),
+        "bit_width": bit_width,
+        "input_shape": list(quant_meta["input_shape"]),
+        "quantized_shape": list(quant_meta["quantized_shape"]),
+        "int_min": int(quant_meta["int_min"]),
+        "int_max": int(quant_meta["int_max"]),
+        "sat_min_count": int(quant_meta["sat_min_count"]),
+        "sat_max_count": int(quant_meta["sat_max_count"]),
+    }
+    return entry
+
+
+def main(
+    out_dir: str,
+    source: str,
+    sample_index: int,
+    seed: int | None,
+    mat: str,
+    input_dir: str,
+    num_inputs: int,
+    model: str | None,
+    scale: float | None,
+) -> None:
+    _set_seed(seed)
+    if num_inputs <= 0:
+        raise ValueError(f"num_inputs must be >= 1, got {num_inputs}")
+
+    out_dir_path = Path(out_dir).resolve()
+    out_dir_path.mkdir(parents=True, exist_ok=True)
+    input_dir_path = Path(input_dir).resolve()
+    input_dir_path.mkdir(parents=True, exist_ok=True)
+    model_path = Path(model).resolve() if model is not None else None
+
+    probe_indices = _load_probe_indices(mat)
+    n_probe = int(probe_indices.numel())
+
+    A0, AL_clean, source_desc = _select_sample(source, sample_index)
+    u_in, ssfm_output, ssfm_output_probe, t_grid, probe_t_grid = _build_deploy_views(
+        A0, AL_clean, probe_indices
+    )
 
     np.save(out_dir_path / "input.npy", u_in)
     np.save(out_dir_path / "ssfm_output.npy", ssfm_output)
@@ -184,6 +394,39 @@ def main(out_dir: str, source: str, sample_index: int, seed: int | None, mat: st
         AL_clean_imag=AL_clean.imag.detach().cpu().numpy().astype(np.float32),
     )
 
+    manifest_entries: list[dict[str, object]] = []
+    for offset in range(num_inputs):
+        current_index = sample_index + offset
+        A0_i, AL_i, source_desc_i = _select_sample(source, current_index)
+        u_in_i, _, _, _, _ = _build_deploy_views(A0_i, AL_i, probe_indices)
+        stem = f"input_{offset:03d}"
+        entry = _save_board_input_set(
+            input_dir_path=input_dir_path,
+            stem=stem,
+            u_in=u_in_i,
+            model_path=model_path,
+            scale=scale,
+        )
+        entry["source"] = source_desc_i
+        entry["sample_index"] = current_index
+        manifest_entries.append(entry)
+
+        if offset == 0:
+            np.save(input_dir_path / "input.npy", u_in_i)
+            np.save(input_dir_path / f"input_int{int(entry['bit_width'])}.npy", np.load(input_dir_path / entry["quant_npy"]))
+            (input_dir_path / "input.bin").write_bytes((input_dir_path / entry["bin"]).read_bytes())
+
+    manifest = {
+        "source": source,
+        "seed": seed,
+        "mat": str(Path(mat).resolve()),
+        "model": None if model_path is None else str(model_path),
+        "num_inputs": num_inputs,
+        "probe_points_complex": n_probe,
+        "entries": manifest_entries,
+    }
+    (input_dir_path / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
     print(f"[OK] Generated verification tensors in: {out_dir_path}")
     print(f"     source        : {source_desc}")
     print(f"     seed          : {seed if seed is not None else 'none'}")
@@ -191,8 +434,10 @@ def main(out_dir: str, source: str, sample_index: int, seed: int | None, mat: st
     print(f"     input.npy     : shape={tuple(u_in.shape)} dtype={u_in.dtype}")
     print(f"     ssfm_output   : shape={tuple(ssfm_output.shape)} dtype={ssfm_output.dtype}")
     print(f"     ssfm_probe    : shape={tuple(ssfm_output_probe.shape)} dtype={ssfm_output_probe.dtype}")
+    print(f"     input folder  : {input_dir_path}")
+    print(f"     input bins    : generated {num_inputs} file(s) plus input/input.bin alias")
     print("     note          : input.npy is float32 deploy input; board-specific raw quantization")
-    print("                     should be added later in the board host/runtime layer.")
+    print("                     has also been emitted into the input/ folder for board-side use.")
 
 
 if __name__ == "__main__":
@@ -212,6 +457,30 @@ if __name__ == "__main__":
         default="trunk_matrices.npz",
         help="Deploy trunk matrix file used to recover the exact time_indices for the board probe.",
     )
+    ap.add_argument(
+        "--input_dir",
+        type=str,
+        default="input",
+        help="Directory where board-ready input.bin files will be written.",
+    )
+    ap.add_argument(
+        "--num_inputs",
+        type=int,
+        default=1,
+        help="How many board-ready input.bin files to generate.",
+    )
+    ap.add_argument(
+        "--model",
+        type=str,
+        default="deeponet_u250_int4_qonnx.onnx",
+        help="Optional QONNX model used to auto-read the input quantization scale.",
+    )
+    ap.add_argument(
+        "--scale",
+        type=float,
+        default=None,
+        help="Optional manual override for the input quantization scale.",
+    )
     args = ap.parse_args()
     main(
         out_dir=args.out_dir,
@@ -219,4 +488,8 @@ if __name__ == "__main__":
         sample_index=args.sample_index,
         seed=args.seed,
         mat=args.mat,
+        input_dir=args.input_dir,
+        num_inputs=args.num_inputs,
+        model=args.model,
+        scale=args.scale,
     )

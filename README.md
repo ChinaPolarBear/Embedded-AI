@@ -86,7 +86,7 @@ The current repository includes:
   Clean SSFM reference output paired with `input.npy`.
 
 - `verification_io/ssfm_output_probe.npy`
-  Compact complex SSFM reference with shape `[1,64]`: first 32 values are real, last 32 values are imag.
+  Compact complex SSFM reference with shape `[1,16]`: first 8 values are real, last 8 values are imag.
 
 - `verification_io/verification_case.npz`
   Full verification bundle containing the waveform, branch input, SSFM reference output, and metadata such as `t_grid`.
@@ -163,7 +163,7 @@ Current compact-complex board-probe recommendation for a much smaller deployment
 python step1_export_trunk_matrices.py \
   --ckpt hybrid_pinn_deeponet.pth \
   --out trunk_matrices.npz \
-  --n_t_out 32 \
+  --n_t_out 8 \
   --time_slice uniform
 ```
 
@@ -222,8 +222,8 @@ What Step 3 now does:
 - uses signed int4 input quantization
 - uses unsigned int4 quantized `ReLU` activations
 - can explicitly quantize the final output tensor to signed int4
-- uses a board-probe deploy interface with input `[B,64]`: first 32 values are real(A(0,t_probe)), last 32 values are imag(A(0,t_probe))
-- exports one `[B,64]` tensor: first 32 values are real(A(L,t_probe)), last 32 values are imag(A(L,t_probe))
+- uses a board-probe deploy interface with input `[B,16]`: first 8 values are real(A(0,t_probe)), last 8 values are imag(A(0,t_probe))
+- exports one `[B,16]` tensor: first 8 values are real(A(L,t_probe)), last 8 values are imag(A(L,t_probe))
 
 ### 6. Convert QONNX to FINN-ONNX (Step 4)
 
@@ -532,9 +532,9 @@ The script reports:
 
 Important:
 
-- `board_output.npy` must already be decoded/dequantized into `[B,64]` float for the current compact-complex probe, or into one of the older complex forms `[B,2,N_t]`, `[B,N_t,2]`, flattened `[B,2*N_t]`, `[2,N_t]`, `[N_t,2]`, flattened `[2*N_t]`, or complex waveform form
-- for the current board-probe deploy output, use `[1,64]`: `output[0,0:32]` is real(A(L,t_probe)) and `output[0,32:64]` is imag(A(L,t_probe))
-- raw board-specific integer dumps such as `(1, 64) int32` are not self-describing enough for this script and must be decoded/dequantized first by the board host code
+- `board_output.npy` must already be decoded/dequantized into `[B,16]` float for the current compact-complex probe, or into one of the older complex forms `[B,2,N_t]`, `[B,N_t,2]`, flattened `[B,2*N_t]`, `[2,N_t]`, `[N_t,2]`, flattened `[2*N_t]`, or complex waveform form
+- for the current board-probe deploy output, use `[1,16]`: `output[0,0:8]` is real(A(L,t_probe)) and `output[0,8:16]` is imag(A(L,t_probe))
+- raw board-specific integer dumps such as `(1, 16) int32` are not self-describing enough for this script and must be decoded/dequantized first by the board host code
 
 This is the point where you can honestly say the deployed FPGA path has been functionally checked against the SSFM reference, rather than only synthesized and packaged.
 
@@ -563,7 +563,7 @@ The new QONNX preparation step explicitly validates:
 ```bash
 python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out trunk_matrices.npz
 python step2_deploy_float_sanity.py --ckpt hybrid_pinn_deeponet.pth --mat trunk_matrices.npz
-python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out trunk_matrices.npz --n_t_out 32 --time_slice uniform
+python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out trunk_matrices.npz --n_t_out 8 --time_slice uniform
 python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 10 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --output_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
 # Step 4 takes the raw Step 3 QONNX as input and writes only the FINN-ONNX output.
 python step4_convert_qonnx_to_finn.py --qonnx_in deeponet_u250_int4_qonnx.onnx

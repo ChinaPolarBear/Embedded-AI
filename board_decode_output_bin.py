@@ -8,8 +8,8 @@ This helper targets the deploy package interface we observed in the generated dr
 Typical usage:
     python board_decode_output_bin.py ^
         --input_bin output.bin ^
-        --out_npy output_1x64_raw.npy ^
-        --length 64 ^
+        --out_npy output_1x16_raw.npy ^
+        --length 16 ^
         --datatype INT16
 
 Supported raw sizes:
@@ -25,7 +25,7 @@ from pathlib import Path
 import numpy as np
 
 
-DEFAULT_OUTPUT_LENGTH = 64
+DEFAULT_OUTPUT_LENGTH = 16
 BYTES_PER_INT24 = 3
 
 
@@ -147,7 +147,7 @@ def main(
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--input_bin", type=str, default="output.bin")
-    ap.add_argument("--out_npy", type=str, default="output_1x64_raw.npy")
+    ap.add_argument("--out_npy", type=str, default="output_1x16_raw.npy")
     ap.add_argument(
         "--out_txt",
         type=str,
@@ -172,7 +172,7 @@ if __name__ == "__main__":
         "--length",
         type=int,
         default=DEFAULT_OUTPUT_LENGTH,
-        help="Number of scalar output elements in oshape_normal, e.g. 64 for the compact complex probe build.",
+        help="Number of scalar output elements in oshape_normal, e.g. 16 for the compact complex probe build.",
     )
     args = ap.parse_args()
     main(
