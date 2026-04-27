@@ -2,6 +2,8 @@
 # pip install brevitas qonnx onnx onnxruntime onnxoptimizer
 
 # python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 10 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --output_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
+
+import argparse
 from dataclasses import dataclass
 import numpy as np
 import torch

@@ -16,7 +16,10 @@ This script:
 After this, the FPGA model only needs:
   branch(u) -> b(2P), then 2 GEMVs: real=M_real@b, imag=M_imag@b
 """
+# Shape(1,512)
 # python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out trunk_matrices.npz
+# Shape(1,64)
+# python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out trunk_matrices.npz --n_t_out 32 --time_slice uniform
 import argparse
 import numpy as np
 import torch
