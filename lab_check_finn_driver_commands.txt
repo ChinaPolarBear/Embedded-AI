@@ -1,0 +1,110 @@
+FINN build output shape / driver debug commands
+
+Goal:
+1. Check whether build-time model.onnx is really [1,16] -> [1,16]
+2. Check whether deploy/driver/driver.py still exposes output (1,64)
+3. Find which intermediate ONNX first changes output shape from 16 to 64
+
+==================================================
+Step 1. Go to FINN build directory
+==================================================
+cd /home/xband/finn/my_build
+
+==================================================
+Step 2. Check the exact model.onnx used by build_dataflow
+==================================================
+python3 - <<'PY'
+import onnx
+m = onnx.load("model.onnx")
+for x in m.graph.input:
+    dims = [d.dim_value for d in x.type.tensor_type.shape.dim]
+    print("input ", x.name, dims)
+for x in m.graph.output:
+    dims = [d.dim_value for d in x.type.tensor_type.shape.dim]
+    print("output", x.name, dims)
+PY
+
+Expected if correct:
+input  ... [1, 16]
+output ... [1, 16]
+
+==================================================
+Step 3. Check generated deploy driver metadata
+==================================================
+grep -n "idt\|odt\|ishape_normal\|oshape_normal\|ishape_folded\|oshape_folded\|ishape_packed\|oshape_packed" /home/xband/finn/my_build/output_u250_bitfile/deploy/driver/driver.py
+
+Important:
+If oshape_normal is still [(1, 64)], then final deploy output is not your intended [1,16].
+
+==================================================
+Step 4. List every ONNX under my_build
+==================================================
+find /home/xband/finn/my_build -name "*.onnx"
+
+==================================================
+Step 5. Batch-check all ONNX input/output shapes
+==================================================
+python3 - <<'PY'
+import onnx
+from pathlib import Path
+
+root = Path("/home/xband/finn/my_build")
+for p in sorted(root.rglob("*.onnx")):
+    try:
+        m = onnx.load(str(p))
+        ins = []
+        outs = []
+        for x in m.graph.input:
+            dims = [d.dim_value for d in x.type.tensor_type.shape.dim]
+            ins.append((x.name, dims))
+        for x in m.graph.output:
+            dims = [d.dim_value for d in x.type.tensor_type.shape.dim]
+            outs.append((x.name, dims))
+        print(f"\nFILE: {p}")
+        print("  inputs :", ins)
+        print("  outputs:", outs)
+    except Exception as e:
+        print(f"\nFILE: {p}")
+        print("  ERROR :", e)
+PY
+
+Goal:
+Find the first intermediate ONNX whose output becomes [1,64].
+
+==================================================
+Step 6. Check timestamps to rule out stale build outputs
+==================================================
+ls -ltr /home/xband/finn/my_build
+ls -ltr /home/xband/finn/my_build/output_u250_bitfile
+ls -ltr /home/xband/finn/my_build/output_u250_bitfile/deploy/driver
+
+==================================================
+Step 7. Find every generated driver.py under my_build
+==================================================
+find /home/xband/finn/my_build -path "*/deploy/driver/driver.py"
+
+==================================================
+Step 8. Inspect the last nodes of model.onnx
+==================================================
+python3 - <<'PY'
+import onnx
+m = onnx.load("model.onnx")
+print("graph output:")
+for x in m.graph.output:
+    print(" ", x.name)
+print("\nlast 8 nodes:")
+for node in m.graph.node[-8:]:
+    print(node.op_type, list(node.input), list(node.output))
+PY
+
+Expected if correct:
+The final graph output should still be y_out with shape [1,16],
+and the last compute node should still look like the final MatMul feeding y_out.
+
+==================================================
+Please send back these outputs
+==================================================
+1. Step 2 full output
+2. Step 3 full output
+3. From Step 5: the first file that shows output [1,64]
+4. Step 8 full output

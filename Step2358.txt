@@ -1,0 +1,151 @@
+Step 8
+last 8 nodes:
+Add ['Mul_3_out0', 'Add_2_param0'] ['Add_2_out0']
+MultiThreshold ['Add_2_out0', 'MultiThreshold_2_param0'] ['MultiThreshold_2_out0']
+Mul ['MultiThreshold_2_out0', 'Mul_4_param0'] ['Mul_4_out0']
+MatMul ['Mul_4_out0', 'MatMul_2_param0'] ['MatMul_2_out0']
+Mul ['MatMul_2_out0', 'Mul_5_param0'] ['Mul_5_out0']
+Add ['Mul_5_out0', 'Add_3_param0'] ['Add_3_out0']
+MatMul ['Add_3_out0', 'MatMul_3_param0'] ['MatMul_3_out0']
+Mul ['MatMul_3_out0', 'Mul_6_param0'] ['global_out']
+
+
+Step2 step3
+input  global_in [1, 16]
+output global_out [1, 16]
+(finn_runtime_env) xband@wandle:~/finn/my_build$ grep -n "idt\|odt\|ishape_normal\|oshape_normal\|ishape_folded\|oshape_folded\|ishape_packed\|oshape_packed" /home/xband/finn/my_build/output_u250_bitfile/deploy/driver/driver.py
+40:    "idt" : [DataType['INT4']],
+41:    "odt" : [DataType['INT16']],
+43:    "ishape_normal" : [(1, 16)],
+44:    "oshape_normal" : [(1, 64)],
+45:    # folded / packed shapes below depend on idt/odt and input/output
+48:    "ishape_folded" : [(1, 16, 1)],
+49:    "oshape_folded" : [(1, 64, 1)],
+50:    "ishape_packed" : [(1, 16, 1)],
+51:    "oshape_packed" : [(1, 64, 2)],
+
+Step5
+finn_runtime_env) xband@wandle:~/finn/my_build$ python3 - <<'PY'
+import onnx
+from pathlib import Path
+
+root = Path("/home/xband/finn/my_build")
+for p in sorted(root.rglob("*.onnx")):
+    try:
+        m = onnx.load(str(p))
+        ins = []
+        outs = []
+        for x in m.graph.input:
+            dims = [d.dim_value for d in x.type.tensor_type.shape.dim]
+            ins.append((x.name, dims))
+        for x in m.graph.output:
+            dims = [d.dim_value for d in x.type.tensor_type.shape.dim]
+            outs.append((x.name, dims))
+        print(f"\nFILE: {p}")
+        print("  inputs :", ins)
+        print("  outputs:", outs)
+    except Exception as e:
+        print(f"\nFILE: {p}")
+        print("  ERROR :", e)
+PY
+
+FILE: /home/xband/finn/my_build/model.onnx
+  inputs : [('global_in', [1, 16])]
+  outputs: [('global_out', [1, 16])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/dataflow_parent.onnx
+  inputs : [('global_in', [1, 16])]
+  outputs: [('global_out', [1, 16])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/kernel_partitions/partition_0.onnx
+  inputs : [('global_in', [1, 16])]
+  outputs: [('IODMA_hls_0_out0', [1, 16])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/kernel_partitions/partition_1.onnx
+  inputs : [('StreamingFIFO_rtl_3_out0', [1, 64])]
+  outputs: [('global_out', [1, 64])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/kernel_partitions/partition_2.onnx
+  inputs : [('IODMA_hls_0_out0', [1, 16])]
+  outputs: [('StreamingFIFO_rtl_3_out0', [1, 64])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_apply_folding_config.onnx
+  inputs : [('MultiThreshold_0_out0', [1, 16])]
+  outputs: [('MatMul_2_out0', [1, 64])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_convert_to_hw.onnx
+  inputs : [('global_in', [1, 16])]
+  outputs: [('global_out', [1, 16])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_create_dataflow_partition.onnx
+  inputs : [('MultiThreshold_0_out0', [1, 16])]
+  outputs: [('MatMul_2_out0', [1, 64])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_create_stitched_ip.onnx
+  inputs : [('global_in', [1, 16])]
+  outputs: [('global_out', [1, 64])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_deployment_package.onnx
+  inputs : [('global_in', [1, 16])]
+  outputs: [('global_out', [1, 64])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_generate_estimate_reports.onnx
+  inputs : [('MultiThreshold_0_out0', [1, 16])]
+  outputs: [('MatMul_2_out0', [1, 64])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_hw_codegen.onnx
+  inputs : [('MultiThreshold_0_out0', [1, 16])]
+  outputs: [('MatMul_2_out0', [1, 64])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_hw_ipgen.onnx
+  inputs : [('MultiThreshold_0_out0', [1, 16])]
+  outputs: [('MatMul_2_out0', [1, 64])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_make_pynq_driver.onnx
+  inputs : [('global_in', [1, 16])]
+  outputs: [('global_out', [1, 64])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_measure_rtlsim_performance.onnx
+  inputs : [('global_in', [1, 16])]
+  outputs: [('global_out', [1, 64])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_minimize_bit_width.onnx
+  inputs : [('MultiThreshold_0_out0', [1, 16])]
+  outputs: [('MatMul_2_out0', [1, 64])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_out_of_context_synthesis.onnx
+  inputs : [('global_in', [1, 16])]
+  outputs: [('global_out', [1, 64])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_qonnx_to_finn.onnx
+  inputs : [('global_in', [1, 16])]
+  outputs: [('global_out', [1, 16])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_set_fifo_depths.onnx
+  inputs : [('global_in', [1, 16])]
+  outputs: [('global_out', [1, 64])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_specialize_layers.onnx
+  inputs : [('MultiThreshold_0_out0', [1, 16])]
+  outputs: [('MatMul_2_out0', [1, 64])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_streamline.onnx
+  inputs : [('global_in', [1, 16])]
+  outputs: [('global_out', [1, 16])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_synthesize_bitfile.onnx
+  inputs : [('global_in', [1, 16])]
+  outputs: [('global_out', [1, 64])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_target_fps_parallelization.onnx
+  inputs : [('MultiThreshold_0_out0', [1, 16])]
+  outputs: [('MatMul_2_out0', [1, 64])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/step_tidy_up.onnx
+  inputs : [('global_in', [1, 16])]
+  outputs: [('global_out', [1, 16])]
+
+FILE: /home/xband/finn/my_build/output_u250_bitfile/intermediate_models/supported_op_partitions/partition_0.onnx
+  inputs : [('MultiThreshold_0_out0', [1, 16])]
+  outputs: [('MatMul_2_out0', [1, 64])]
+

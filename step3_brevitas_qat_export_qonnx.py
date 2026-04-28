@@ -1,7 +1,7 @@
 # Step 3
 # pip install brevitas qonnx onnx onnxruntime onnxoptimizer
-
-# python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 10 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
+# hidden layer 64
+# python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 10 --hidden 64 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
 
 import argparse
 from dataclasses import dataclass
@@ -126,6 +126,11 @@ class DeepONetFinnDeployQuant(nn.Module):
             out_dim=two_p,
             quant_cfg=quant_cfg,
         )
+        self.latent_quant = QuantIdentity(
+            act_quant=Int8ActPerTensorFloat,
+            bit_width=quant_cfg.act_bit_width,
+            return_quant_tensor=True,
+        )
 
         self.out_fc = QuantLinear(
             two_p,
@@ -150,6 +155,7 @@ class DeepONetFinnDeployQuant(nn.Module):
 
     def forward(self, u_in):
         branch_out = self.branch(u_in)
+        branch_out = self.latent_quant(branch_out)
         out = self.out_fc(branch_out)
         if self.output_quant is not None:
             out = self.output_quant(out)

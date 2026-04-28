@@ -401,7 +401,7 @@ Then run the build from the FINN root directory:
 ```json
 {
   "output_dir": "output_u250_bitfile",
-  "synth_clk_period_ns": 5.0,
+  "synth_clk_period_ns": 10.0,
   "fpga_part": "xcu250-figd2104-2L-e",
   "shell_flow_type": "vitis_alveo",
   "vitis_platform": "xilinx_u250_gen3x16_xdma_4_1_202210_1",
