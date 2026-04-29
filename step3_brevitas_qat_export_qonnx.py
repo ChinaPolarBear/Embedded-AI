@@ -1,7 +1,8 @@
 # Step 3
 # pip install brevitas qonnx onnx onnxruntime onnxoptimizer
-# hidden layer 64
-# python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 10 --hidden 64 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
+
+# recommended higher-accuracy probe: hidden 128, latent 128 (via step1 p_dim_out 64), epochs 200
+# python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 200 --dataset_samples 1024 --lr 2e-4 --hidden 128 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
 
 import argparse
 from dataclasses import dataclass
@@ -305,7 +306,9 @@ def main(
             opt.step()
             total += loss.item()
 
-        print(f"epoch {ep:03d}: loss={total * 32 / A0.shape[0]:.6e}")
+        avg_loss = total * 32 / A0.shape[0]
+        if ep == 1 or ep % 10 == 0 or ep == epochs:
+            print(f"epoch {ep:03d}: loss={avg_loss:.6e}")
 
     export_model_to_qonnx(model, qonnx_out=qonnx_out)
 

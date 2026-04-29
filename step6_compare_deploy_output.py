@@ -28,6 +28,9 @@ Raw board-specific integer dumps such as [1, N_t] int32 are ambiguous and must b
 decoded/dequantized first by the board host/runtime code before using this script.
 """
 # python step6_compare_deploy_output.py --case verification/verification_case.npz --actual output.npy
+# mutiple case
+# python step6_compare_deploy_output.py --cases_dir verification --actual_name output.npy
+# python step6_compare_deploy_output.py --cases_dir verification --actual_name output_dequant.npy
 
 
 from __future__ import annotations
@@ -237,6 +240,17 @@ def _combined_legend(ax_left, ax_right) -> None:
     ax_left.legend(handles_left + handles_right, labels_left + labels_right)
 
 
+def _describe_actual_kind(actual_path: Path) -> str:
+    name = actual_path.name.lower()
+    if "dequant" in name:
+        return "dequantized"
+    if "raw" in name:
+        return "raw"
+    if name == "output.npy":
+        return "raw"
+    return "provided"
+
+
 def _plot_amplitude(
     t_grid: np.ndarray,
     A0: np.ndarray,
@@ -244,6 +258,7 @@ def _plot_amplitude(
     actual_complex: np.ndarray,
     output_dir: Path,
     metrics: dict[str, float],
+    actual_kind: str,
 ) -> None:
     fig, ax_left = plt.subplots(figsize=(12, 4))
     ax_right = ax_left.twinx()
@@ -273,7 +288,7 @@ def _plot_amplitude(
     ax_right.set_ylabel("|A| board/runtime", color="tab:green")
     ax_left.tick_params(axis="y", colors="tab:blue")
     ax_right.tick_params(axis="y", colors="tab:green")
-    ax_left.set_title("Amplitude Comparison at z = L (dual-axis)")
+    ax_left.set_title(f"Amplitude Comparison at z = L ({actual_kind}, dual-axis)")
     ax_left.grid(True)
     _combined_legend(ax_left, ax_right)
     _overlay_text(ax_left, _metrics_text(metrics))
@@ -287,6 +302,7 @@ def _plot_constellation(
     actual_complex: np.ndarray,
     output_dir: Path,
     metrics: dict[str, float],
+    actual_kind: str,
 ) -> None:
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.scatter(expected_complex.real, expected_complex.imag, s=10, alpha=0.45, label="SSFM reference")
@@ -295,7 +311,7 @@ def _plot_constellation(
     ax.axvline(0, color="gray", linewidth=0.5)
     ax.set_xlabel("In-phase (I)")
     ax.set_ylabel("Quadrature (Q)")
-    ax.set_title("Constellation Comparison at z = L")
+    ax.set_title(f"Constellation Comparison at z = L ({actual_kind})")
     ax.grid(True)
     ax.legend()
     ax.set_aspect("equal", "box")
@@ -311,6 +327,7 @@ def _plot_error(
     actual_complex: np.ndarray,
     output_dir: Path,
     metrics: dict[str, float],
+    actual_kind: str,
 ) -> None:
     diff_complex = actual_complex - expected_complex
     amp_diff = np.abs(actual_complex) - np.abs(expected_complex)
@@ -321,7 +338,7 @@ def _plot_error(
     axes[0].plot(t_grid, diff_complex.real, label="Real error")
     axes[0].plot(t_grid, diff_complex.imag, label="Imag error", alpha=0.8)
     axes[0].set_ylabel("Channel Error")
-    axes[0].set_title("Real/Imag Error at z = L")
+    axes[0].set_title(f"Real/Imag Error at z = L ({actual_kind})")
     axes[0].grid(True)
     axes[0].legend()
     _overlay_text(axes[0], _metrics_text(metrics))
@@ -330,7 +347,7 @@ def _plot_error(
     axes[1].plot(t_grid, abs_complex_diff, label="|Complex error|", alpha=0.8)
     axes[1].set_xlabel("Time")
     axes[1].set_ylabel("Error")
-    axes[1].set_title("Amplitude and Complex Error at z = L")
+    axes[1].set_title(f"Amplitude and Complex Error at z = L ({actual_kind})")
     axes[1].grid(True)
     axes[1].legend()
 
@@ -346,6 +363,7 @@ def _plot_real_channel(
     actual_real: np.ndarray,
     output_dir: Path,
     metrics: dict[str, float],
+    actual_kind: str,
 ) -> None:
     fig, ax_left = plt.subplots(figsize=(12, 4))
     ax_right = ax_left.twinx()
@@ -375,7 +393,7 @@ def _plot_real_channel(
     ax_right.set_ylabel("Real channel board/runtime", color="tab:green")
     ax_left.tick_params(axis="y", colors="tab:blue")
     ax_right.tick_params(axis="y", colors="tab:green")
-    ax_left.set_title("Real-Channel Comparison at z = L (dual-axis)")
+    ax_left.set_title(f"Real-Channel Comparison at z = L ({actual_kind}, dual-axis)")
     ax_left.grid(True)
     _combined_legend(ax_left, ax_right)
     _overlay_text(ax_left, _metrics_text(metrics))
@@ -390,12 +408,13 @@ def _plot_real_error(
     actual_real: np.ndarray,
     output_dir: Path,
     metrics: dict[str, float],
+    actual_kind: str,
 ) -> None:
     fig, ax = plt.subplots(figsize=(12, 4))
     ax.plot(t_grid, actual_real - expected_real, label="Real-channel error")
     ax.set_xlabel("Time")
     ax.set_ylabel("Error")
-    ax.set_title("Real-Channel Error at z = L")
+    ax.set_title(f"Real-Channel Error at z = L ({actual_kind})")
     ax.grid(True)
     ax.legend()
     _overlay_text(ax, _metrics_text(metrics))
@@ -466,6 +485,7 @@ def _run_single_case(
 
     expected_arr, A0, t_grid, source = _load_case(case_path)
     actual_arr = _normalize_output(np.load(actual_path), "actual", expected_n_t=expected_arr.shape[-1])
+    actual_kind = _describe_actual_kind(actual_path)
 
     if expected_arr.shape != actual_arr.shape:
         raise ValueError(
@@ -487,14 +507,14 @@ def _run_single_case(
     if expected_arr.shape[1] == 1:
         expected_real = expected_arr[0, 0, :]
         actual_real = actual_arr[0, 0, :]
-        _plot_real_channel(t_grid, A0, expected_real, actual_real, figures_dir, metrics)
-        _plot_real_error(t_grid, expected_real, actual_real, figures_dir, metrics)
+        _plot_real_channel(t_grid, A0, expected_real, actual_real, figures_dir, metrics, actual_kind)
+        _plot_real_error(t_grid, expected_real, actual_real, figures_dir, metrics, actual_kind)
     else:
         expected_complex = expected_arr[0, 0, :] + 1j * expected_arr[0, 1, :]
         actual_complex = actual_arr[0, 0, :] + 1j * actual_arr[0, 1, :]
-        _plot_amplitude(t_grid, A0, expected_complex, actual_complex, figures_dir, metrics)
-        _plot_constellation(expected_complex, actual_complex, figures_dir, metrics)
-        _plot_error(t_grid, expected_complex, actual_complex, figures_dir, metrics)
+        _plot_amplitude(t_grid, A0, expected_complex, actual_complex, figures_dir, metrics, actual_kind)
+        _plot_constellation(expected_complex, actual_complex, figures_dir, metrics, actual_kind)
+        _plot_error(t_grid, expected_complex, actual_complex, figures_dir, metrics, actual_kind)
     _save_metrics(figures_dir, metrics)
 
     if diff_out is not None:
