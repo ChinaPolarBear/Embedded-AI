@@ -9,7 +9,7 @@ sudo /opt/xilinx/xrt/bin/xbmgmt program --device 65:00.0 --shell /lib/firmware/x
 sudo /opt/xilinx/xrt/bin/xbutil examine
 
 
-1.先跑一遍quicktest，然后进入docker
+1.先跑一遍quicktest，然后进入docker（可以先尝试第二步，不行的话再返回跑这个）
 
 cd ~
 mkdir -p ~/finn_tmp
