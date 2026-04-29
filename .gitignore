@@ -32,8 +32,7 @@ figures/
 *.npy
 *.bin
 # Verification Inputs & outputs
-verification_io/
-verification_io_*/
-input/
+verification/
+
 # Local duplicate readme
 README

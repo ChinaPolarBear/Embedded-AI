@@ -2,10 +2,17 @@
 Step 5: Generate one board-side verification case using an SSFM reference.
 
 Typical usage:
-    python step5_generate_verification_io.py \
-        --out_dir verification_io \
+    python step5_generate_verification.py \
+        --out_dir verification \
         --source random \
         --seed 123
+
+Multi-case usage:
+    python step5_generate_verification.py \
+        --out_dir verification \
+        --source random \
+        --seed 123 \
+        --num_cases 5
 
 This script:
   1) Selects one waveform sample from the existing project data path.
@@ -13,21 +20,21 @@ This script:
   3) Uses SSFM to obtain the clean reference output at z=L.
   4) Saves:
        - input.npy
+       - input_int4.npy
+       - input.bin
        - ssfm_output.npy
        - ssfm_output_probe.npy
        - verification_case.npz
-       - optional board-ready input binaries in a separate input/ folder
 
 Notes:
   - `input.npy` is the compact float32 complex input expected by the exported probe model:
     first N_probe values are real(A(0,t_probe)), last N_probe values are imag(A(0,t_probe)).
   - `ssfm_output_probe.npy` matches the compact deploy output layout:
     first N_probe values are real(A(L,t_probe)), last N_probe values are imag(A(L,t_probe)).
-  - If your board runtime later expects a quantized/raw format, keep this script as the
-    source of truth for the waveform. This script can now also emit board-ready `input.bin`
-    files using the same quantization path internally.
+  - `input.bin` is the board-ready raw input generated from the exact same sample as
+    `input.npy` and `verification_case.npz`.
 """
-# python step5_generate_verification_io.py --out_dir verification_io --source random --seed 123 --mat trunk_matrices.npz --input_dir input --num_inputs 2 --model deeponet_u250_int4_qonnx.onnx
+# python step5_generate_verification.py --out_dir verification --source random --seed 123 --mat trunk_matrices.npz --model deeponet_u250_int4_qonnx.onnx
 
 from __future__ import annotations
 
@@ -304,8 +311,7 @@ def _build_deploy_views(
 
 
 def _save_board_input_set(
-    input_dir_path: Path,
-    stem: str,
+    out_dir_path: Path,
     u_in: np.ndarray,
     model_path: Path | None,
     scale: float | None,
@@ -313,16 +319,15 @@ def _save_board_input_set(
     q_arr, quant_meta = prepare_board_input_array(u_in, model_path=model_path, scale=scale)
     bit_width = int(quant_meta["bit_width"])
 
-    float_path = input_dir_path / f"{stem}.npy"
-    bin_path = input_dir_path / f"{stem}.bin"
-    quant_path = input_dir_path / f"{stem}_int{bit_width}.npy"
+    float_path = out_dir_path / "input.npy"
+    bin_path = out_dir_path / "input.bin"
+    quant_path = out_dir_path / f"input_int{bit_width}.npy"
 
     np.save(float_path, u_in)
     np.save(quant_path, q_arr)
     q_arr.reshape(-1).tofile(bin_path)
 
     entry: dict[str, object] = {
-        "stem": stem,
         "float_npy": float_path.name,
         "quant_npy": quant_path.name,
         "bin": bin_path.name,
@@ -340,36 +345,30 @@ def _save_board_input_set(
     return entry
 
 
-def main(
-    out_dir: str,
-    source: str,
+def _write_verification_case(
+    out_dir_path: Path,
+    source_desc: str,
     sample_index: int,
     seed: int | None,
-    mat: str,
-    input_dir: str,
-    num_inputs: int,
-    model: str | None,
+    probe_indices: torch.Tensor,
+    u_in: np.ndarray,
+    ssfm_output: np.ndarray,
+    ssfm_output_probe: np.ndarray,
+    t_grid: np.ndarray,
+    probe_t_grid: np.ndarray,
+    A0: torch.Tensor,
+    AL_clean: torch.Tensor,
+    model_path: Path | None,
     scale: float | None,
-) -> None:
-    _set_seed(seed)
-    if num_inputs <= 0:
-        raise ValueError(f"num_inputs must be >= 1, got {num_inputs}")
-
-    out_dir_path = Path(out_dir).resolve()
-    out_dir_path.mkdir(parents=True, exist_ok=True)
-    input_dir_path = Path(input_dir).resolve()
-    input_dir_path.mkdir(parents=True, exist_ok=True)
-    model_path = Path(model).resolve() if model is not None else None
-
-    probe_indices = _load_probe_indices(mat)
+) -> dict[str, object]:
+    input_meta = _save_board_input_set(
+        out_dir_path=out_dir_path,
+        u_in=u_in,
+        model_path=model_path,
+        scale=scale,
+    )
     n_probe = int(probe_indices.numel())
 
-    A0, AL_clean, source_desc = _select_sample(source, sample_index)
-    u_in, ssfm_output, ssfm_output_probe, t_grid, probe_t_grid = _build_deploy_views(
-        A0, AL_clean, probe_indices
-    )
-
-    np.save(out_dir_path / "input.npy", u_in)
     np.save(out_dir_path / "ssfm_output.npy", ssfm_output)
     np.save(out_dir_path / "ssfm_output_probe.npy", ssfm_output_probe)
     np.savez(
@@ -388,61 +387,108 @@ def main(
         ssfm_output_probe=ssfm_output_probe,
         expected_output=ssfm_output_probe,
         probe_indices=probe_indices.detach().cpu().numpy().astype(np.int32),
+        input_quant_scale=np.array([float(input_meta["scale"])], dtype=np.float32),
+        input_quant_zero_point=np.array([float(input_meta["zero_point"])], dtype=np.float32),
+        input_quant_bit_width=np.array([int(input_meta["bit_width"])], dtype=np.int32),
         A0_real=A0.real.detach().cpu().numpy().astype(np.float32),
         A0_imag=A0.imag.detach().cpu().numpy().astype(np.float32),
         AL_clean_real=AL_clean.real.detach().cpu().numpy().astype(np.float32),
         AL_clean_imag=AL_clean.imag.detach().cpu().numpy().astype(np.float32),
     )
+    return input_meta
 
-    manifest_entries: list[dict[str, object]] = []
-    for offset in range(num_inputs):
-        current_index = sample_index + offset
-        A0_i, AL_i, source_desc_i = _select_sample(source, current_index)
-        u_in_i, _, _, _, _ = _build_deploy_views(A0_i, AL_i, probe_indices)
-        stem = f"input_{offset:03d}"
-        entry = _save_board_input_set(
-            input_dir_path=input_dir_path,
-            stem=stem,
-            u_in=u_in_i,
+
+def main(
+    out_dir: str,
+    source: str,
+    sample_index: int,
+    seed: int | None,
+    mat: str,
+    model: str | None,
+    scale: float | None,
+    num_cases: int,
+) -> None:
+    _set_seed(seed)
+    if num_cases < 1:
+        raise ValueError(f"num_cases must be >= 1, got {num_cases}")
+
+    out_dir_path = Path(out_dir).resolve()
+    out_dir_path.mkdir(parents=True, exist_ok=True)
+    model_path = Path(model).resolve() if model is not None else None
+
+    probe_indices = _load_probe_indices(mat)
+    n_probe = int(probe_indices.numel())
+    manifest: list[dict[str, object]] = []
+
+    for case_idx in range(num_cases):
+        effective_sample_index = sample_index + case_idx
+        case_out_dir = out_dir_path if num_cases == 1 else out_dir_path / f"case_{case_idx:03d}"
+        case_out_dir.mkdir(parents=True, exist_ok=True)
+
+        A0, AL_clean, source_desc = _select_sample(source, effective_sample_index)
+        u_in, ssfm_output, ssfm_output_probe, t_grid, probe_t_grid = _build_deploy_views(
+            A0, AL_clean, probe_indices
+        )
+        input_meta = _write_verification_case(
+            out_dir_path=case_out_dir,
+            source_desc=source_desc,
+            sample_index=effective_sample_index,
+            seed=seed,
+            probe_indices=probe_indices,
+            u_in=u_in,
+            ssfm_output=ssfm_output,
+            ssfm_output_probe=ssfm_output_probe,
+            t_grid=t_grid,
+            probe_t_grid=probe_t_grid,
+            A0=A0,
+            AL_clean=AL_clean,
             model_path=model_path,
             scale=scale,
         )
-        entry["source"] = source_desc_i
-        entry["sample_index"] = current_index
-        manifest_entries.append(entry)
 
-        if offset == 0:
-            np.save(input_dir_path / "input.npy", u_in_i)
-            np.save(input_dir_path / f"input_int{int(entry['bit_width'])}.npy", np.load(input_dir_path / entry["quant_npy"]))
-            (input_dir_path / "input.bin").write_bytes((input_dir_path / entry["bin"]).read_bytes())
+        manifest.append(
+            {
+                "case_index": case_idx,
+                "case_dir": "." if num_cases == 1 else case_out_dir.name,
+                "source": source_desc,
+                "sample_index": effective_sample_index,
+                "seed": None if seed is None else int(seed),
+                "probe_points": n_probe,
+                "input_shape": list(u_in.shape),
+                "input_bin": str((case_out_dir / "input.bin").name),
+                "verification_case": str((case_out_dir / "verification_case.npz").name),
+                "input_quant_bit_width": int(input_meta["bit_width"]),
+                "input_quant_scale": float(input_meta["scale"]),
+                "input_quant_zero_point": float(input_meta["zero_point"]),
+            }
+        )
 
-    manifest = {
-        "source": source,
-        "seed": seed,
-        "mat": str(Path(mat).resolve()),
-        "model": None if model_path is None else str(model_path),
-        "num_inputs": num_inputs,
-        "probe_points_complex": n_probe,
-        "entries": manifest_entries,
-    }
-    (input_dir_path / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        print(f"[OK] Generated verification tensors in: {case_out_dir}")
+        print(f"     source        : {source_desc}")
+        print(f"     seed          : {seed if seed is not None else 'none'}")
+        print(f"     probe points  : {n_probe} complex samples")
+        print(f"     input.npy     : shape={tuple(u_in.shape)} dtype={u_in.dtype}")
+        print(f"     input.bin     : {case_out_dir / 'input.bin'}")
+        print(
+            f"     input quant   : int{int(input_meta['bit_width'])} "
+            f"scale={float(input_meta['scale']):.9g} zero_point={float(input_meta['zero_point']):.9g}"
+        )
+        print(f"     ssfm_output   : shape={tuple(ssfm_output.shape)} dtype={ssfm_output.dtype}")
+        print(f"     ssfm_probe    : shape={tuple(ssfm_output_probe.shape)} dtype={ssfm_output_probe.dtype}")
+        if num_cases == 1:
+            print("     note          : input.npy, input_int4.npy, input.bin, and verification_case.npz")
+            print("                     all refer to the same single sample.")
 
-    print(f"[OK] Generated verification tensors in: {out_dir_path}")
-    print(f"     source        : {source_desc}")
-    print(f"     seed          : {seed if seed is not None else 'none'}")
-    print(f"     probe points  : {n_probe} complex samples")
-    print(f"     input.npy     : shape={tuple(u_in.shape)} dtype={u_in.dtype}")
-    print(f"     ssfm_output   : shape={tuple(ssfm_output.shape)} dtype={ssfm_output.dtype}")
-    print(f"     ssfm_probe    : shape={tuple(ssfm_output_probe.shape)} dtype={ssfm_output_probe.dtype}")
-    print(f"     input folder  : {input_dir_path}")
-    print(f"     input bins    : generated {num_inputs} file(s) plus input/input.bin alias")
-    print("     note          : input.npy is float32 deploy input; board-specific raw quantization")
-    print("                     has also been emitted into the input/ folder for board-side use.")
+    if num_cases > 1:
+        manifest_path = out_dir_path / "cases_manifest.json"
+        manifest_path.write_text(json.dumps({"cases": manifest}, indent=2), encoding="utf-8")
+        print(f"[OK] Wrote multi-case manifest: {manifest_path}")
+        print("     note          : each case_xxx directory contains one self-consistent sample bundle.")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out_dir", type=str, default="verification_io")
+    ap.add_argument("--out_dir", type=str, default="verification")
     ap.add_argument("--source", type=str, choices=["train", "test", "random"], default="random")
     ap.add_argument("--sample_index", type=int, default=0)
     ap.add_argument(
@@ -458,18 +504,6 @@ if __name__ == "__main__":
         help="Deploy trunk matrix file used to recover the exact time_indices for the board probe.",
     )
     ap.add_argument(
-        "--input_dir",
-        type=str,
-        default="input",
-        help="Directory where board-ready input.bin files will be written.",
-    )
-    ap.add_argument(
-        "--num_inputs",
-        type=int,
-        default=1,
-        help="How many board-ready input.bin files to generate.",
-    )
-    ap.add_argument(
         "--model",
         type=str,
         default="deeponet_u250_int4_qonnx.onnx",
@@ -481,6 +515,12 @@ if __name__ == "__main__":
         default=None,
         help="Optional manual override for the input quantization scale.",
     )
+    ap.add_argument(
+        "--num_cases",
+        type=int,
+        default=1,
+        help="Number of verification cases to generate. Uses case_000, case_001, ... subdirectories when > 1.",
+    )
     args = ap.parse_args()
     main(
         out_dir=args.out_dir,
@@ -488,8 +528,7 @@ if __name__ == "__main__":
         sample_index=args.sample_index,
         seed=args.seed,
         mat=args.mat,
-        input_dir=args.input_dir,
-        num_inputs=args.num_inputs,
         model=args.model,
         scale=args.scale,
+        num_cases=args.num_cases,
     )
