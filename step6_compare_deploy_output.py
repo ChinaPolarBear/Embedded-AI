@@ -248,9 +248,25 @@ def _plot_amplitude(
     fig, ax_left = plt.subplots(figsize=(12, 4))
     ax_right = ax_left.twinx()
 
-    ax_left.plot(t_grid, np.abs(A0), "--", color="tab:blue", alpha=0.8, label="Input |A(0)|")
+    ax_left.plot(
+        t_grid,
+        np.abs(A0),
+        "--",
+        color="tab:blue",
+        alpha=0.28,
+        linewidth=1.3,
+        label="Input |A(0)|",
+    )
     ax_left.plot(t_grid, np.abs(expected_complex), "-", color="tab:blue", alpha=0.9, label="SSFM reference |A(L)|")
-    ax_right.plot(t_grid, np.abs(actual_complex), "--", color="tab:green", alpha=0.9, label="Board/runtime |A(L)|")
+    ax_right.plot(
+        t_grid,
+        np.abs(actual_complex),
+        "--",
+        color="tab:green",
+        alpha=0.9,
+        linewidth=2.4,
+        label="Board/runtime |A(L)|",
+    )
 
     ax_left.set_xlabel("Time")
     ax_left.set_ylabel("|A| input / SSFM", color="tab:blue")
@@ -334,9 +350,25 @@ def _plot_real_channel(
     fig, ax_left = plt.subplots(figsize=(12, 4))
     ax_right = ax_left.twinx()
 
-    ax_left.plot(t_grid, A0.real, "--", color="tab:blue", alpha=0.8, label="Input real(A(0))")
+    ax_left.plot(
+        t_grid,
+        A0.real,
+        "--",
+        color="tab:blue",
+        alpha=0.28,
+        linewidth=1.3,
+        label="Input real(A(0))",
+    )
     ax_left.plot(t_grid, expected_real, "-", color="tab:blue", alpha=0.9, label="SSFM reference real(A(L))")
-    ax_right.plot(t_grid, actual_real, "--", color="tab:green", alpha=0.9, label="Board/runtime real(A(L))")
+    ax_right.plot(
+        t_grid,
+        actual_real,
+        "--",
+        color="tab:green",
+        alpha=0.9,
+        linewidth=2.4,
+        label="Board/runtime real(A(L))",
+    )
 
     ax_left.set_xlabel("Time")
     ax_left.set_ylabel("Real channel input / SSFM", color="tab:blue")
