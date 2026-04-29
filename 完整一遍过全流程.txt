@@ -1,4 +1,4 @@
-0. 切换shell（切换前需要重启电脑）
+﻿0. 切换shell（切换前需要重启电脑）
 
 如果需要切到board生成output所需的 shell
 sudo /opt/xilinx/xrt/bin/xbmgmt program --device 65:00.0 --shell /lib/firmware/xilinx/12c8fafb0632499db1c0c6676271b8a6/partition.xsabin
@@ -35,10 +35,10 @@ export FINN_BUILD_DIR=~/finn_tmp
 ./run-docker.sh
 
 
-3.zip压缩包放到my_build文件夹中然后解压，解压后会看到三个文件，deeponet_u250_int4_qonnx.onnx,finn_qonnx_utils.py,step4_convert_qonnx_to_finn.py
+3.zip压缩包放到my_build文件夹中然后解压，解压后会看到两个文件，deeponet_u250_int4_qonnx.onnx,step4_convert_qonnx_to_finn.py
 运行以下代码，完成后会生成deeponet_u250_int4_qonnx_finn.onnx，将其更名为model.onnx,记得把旧的model.onnx删掉！！！！
-cd my_build
 
+cd my_build
 python step4_convert_qonnx_to_finn.py --qonnx_in deeponet_u250_int4_qonnx.onnx
 
 
@@ -97,4 +97,6 @@ export PLATFORM_REPO_PATHS=/opt/xilinx/platforms
 
 测试代码请移步 
 板端生成output代码.txt
+
+
 

@@ -58,6 +58,7 @@ The current repository includes:
 
 - `step4_convert_qonnx_to_finn.py`
   Runs QONNX cleanup / validation internally and then calls `ConvertQONNXtoFINN()` to generate FINN-ONNX.
+  The script is self-contained, so for lab-side Step 4 you only need this file and the raw QONNX model.
 
 - `step5_generate_verification.py`
   Generates one or more verification cases for board-side checking: `input.npy` for the deploy branch input, `ssfm_output.npy` as the clean SSFM reference, and `verification_case.npz` with the full sample metadata.
@@ -66,7 +67,7 @@ The current repository includes:
   Compares decoded runtime / board output against the saved SSFM reference, reports error metrics, and saves comparison figures.
 
 - `finn_qonnx_utils.py`
-  Shared helpers for QONNX export compatibility, graph cleanup, shape/datatype inference, and `Gemm` / `MatMul` validation.
+  Shared helpers used by local export / debugging utilities. Step 4 itself is now self-contained and does not need this file on the lab computer.
 
 ## Generated Artifacts
 
@@ -270,6 +271,7 @@ Recommended workflow while debugging:
 Important notes:
 
 - `step4_convert_qonnx_to_finn.py` should be run inside the FINN Linux / Docker environment.
+- For lab-side Step 4, copy only `deeponet_u250_int4_qonnx.onnx` and `step4_convert_qonnx_to_finn.py`.
 - The current local Python environment is suitable for Steps 1 to 3, but not for the actual FINN conversion unless `finn` is installed there.
 - The final FINN-ONNX file is the model you should feed into `build_dataflow`.
 
