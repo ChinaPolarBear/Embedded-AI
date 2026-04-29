@@ -195,6 +195,11 @@ int main() {
     }
 }
 
+ctrl+o
+Enter
+ctrl+x
+
+
 第 3 步：编译 XRT 程序
 
 source /opt/xilinx/xrt/setup.sh
@@ -220,7 +225,7 @@ if not p.is_file():
 
 raw = np.fromfile("output.bin", dtype=np.uint8)
 print("raw bytes:", raw.size)
-if raw.size != 128:
+if raw.size != 32:
     raise RuntimeError(f"Expected 32 bytes for INT16 (1,16), got {raw.size}")
 
 y_raw = np.fromfile("output.bin", dtype="<i2").astype(np.int32).reshape(1, 16)
@@ -237,6 +242,7 @@ print("imag first 8:", y_raw[0, 8:16])
 print("real nonzero:", np.count_nonzero(y_raw[0, :8]))
 print("imag nonzero:", np.count_nonzero(y_raw[0, 8:]))
 PY
+
 
 第 6 步：把 output.bin 发回本地
 
