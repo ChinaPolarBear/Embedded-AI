@@ -33,9 +33,13 @@ Notes:
     first N_probe values are real(A(L,t_probe)), last N_probe values are imag(A(L,t_probe)).
   - `input.bin` is the board-ready raw input generated from the exact same sample as
     `input.npy` and `verification_case.npz`.
+  - Re-running this script automatically deletes stale board-returned files such as
+    `output.bin`, `output.npy`, `output_dequant.npy`, and `output_raw*.npy` in the
+    target case directory before writing the new verification bundle.
 """
 # python step5_generate_verification.py --out_dir verification --source random --seed 123 --mat trunk_matrices.npz --model deeponet_u250_int4_qonnx.onnx
-
+# generate 5 cases at one time
+# python step5_generate_verification.py --out_dir verification --source random --seed 123 --num_cases 5
 from __future__ import annotations
 
 import argparse
@@ -345,6 +349,24 @@ def _save_board_input_set(
     return entry
 
 
+def _cleanup_previous_runtime_outputs(out_dir_path: Path) -> list[str]:
+    removed: list[str] = []
+    patterns = [
+        "output.bin",
+        "output.npy",
+        "output_dequant.npy",
+        "output_raw*.npy",
+    ]
+
+    for pattern in patterns:
+        for path in sorted(out_dir_path.glob(pattern)):
+            if path.is_file():
+                path.unlink()
+                removed.append(path.name)
+
+    return removed
+
+
 def _write_verification_case(
     out_dir_path: Path,
     source_desc: str,
@@ -424,6 +446,7 @@ def main(
         effective_sample_index = sample_index + case_idx
         case_out_dir = out_dir_path if num_cases == 1 else out_dir_path / f"case_{case_idx:03d}"
         case_out_dir.mkdir(parents=True, exist_ok=True)
+        removed_outputs = _cleanup_previous_runtime_outputs(case_out_dir)
 
         A0, AL_clean, source_desc = _select_sample(source, effective_sample_index)
         u_in, ssfm_output, ssfm_output_probe, t_grid, probe_t_grid = _build_deploy_views(
@@ -475,6 +498,8 @@ def main(
         )
         print(f"     ssfm_output   : shape={tuple(ssfm_output.shape)} dtype={ssfm_output.dtype}")
         print(f"     ssfm_probe    : shape={tuple(ssfm_output_probe.shape)} dtype={ssfm_output_probe.dtype}")
+        if removed_outputs:
+            print(f"     cleaned       : removed stale runtime files: {', '.join(removed_outputs)}")
         if num_cases == 1:
             print("     note          : input.npy, input_int4.npy, input.bin, and verification_case.npz")
             print("                     all refer to the same single sample.")
