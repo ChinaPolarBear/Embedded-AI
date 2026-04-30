@@ -161,10 +161,10 @@ python test_trained_model_csv.py --csv Data_Output/waveform_data_trainmatch.csv 
 python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out trunk_matrices.npz
 ```
 
-Current compact-complex board-probe recommendation for a clearer `(1,64)` interface and better model capacity:
+Current mainline compact-complex recommendation after `my_build_2` routing success:
 
 ```powershell
-python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out trunk_matrices.npz --n_t_out 32 --p_dim_out 64 --time_slice uniform
+python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out trunk_matrices.npz --n_t_out 32 --p_dim_out 16 --time_slice uniform
 ```
 
 ### 4. Float deploy sanity check
@@ -175,18 +175,18 @@ python step2_deploy_float_sanity.py --ckpt hybrid_pinn_deeponet.pth --mat trunk_
 
 ### 5. Export raw QONNX
 
-Recommended higher-accuracy local export for the current `(1,64)` probe:
+Recommended mainline local export for the current `(1,64)` probe:
 
 ```powershell
-python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 50 --dataset_samples 1024 --lr 2e-4 --hidden 128 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
+python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 100 --dataset_samples 1024 --lr 2e-4 --hidden 64 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
 ```
 
 Why this combination:
 
 - `n_t_out = 32` gives a clearer `(1,64)` board-side waveform view
-- `p_dim_out = 64` makes `latent = 128`, which is a good balance between accuracy and deploy complexity
-- `hidden = 128` restores branch capacity
-- `epochs = 50` and `dataset_samples = 1024` give the quantized deploy model much more room to fit
+- `p_dim_out = 16` keeps `latent = 32`, which matches the routing-safe light variant that already built successfully
+- `hidden = 64` increases branch capacity from the light variant without jumping back to the route-failing heavy model
+- `epochs = 100` and `dataset_samples = 1024` improve model fit without changing hardware structure
 - final output is left unquantized on purpose, so Step 6 can compare a cleaner float-domain output after dequantization
 
 For FINN bring-up, prefer a much smaller model first:
