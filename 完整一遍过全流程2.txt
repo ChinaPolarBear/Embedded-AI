@@ -38,7 +38,7 @@ export FINN_BUILD_DIR=~/finn_tmp
 3.zip压缩包放到my_build文件夹中然后解压，解压后会看到两个文件，deeponet_u250_int4_qonnx.onnx,step4_convert_qonnx_to_finn.py
 运行以下代码，完成后会生成deeponet_u250_int4_qonnx_finn.onnx，将其更名为model.onnx,记得把旧的model.onnx删掉！！！！
 
-cd my_build
+cd my_build_2
 python step4_convert_qonnx_to_finn.py --qonnx_in deeponet_u250_int4_qonnx.onnx
 
 
@@ -73,7 +73,7 @@ export FINN_HOST_BUILD_DIR=/home/xband/finn_tmp
 
 echo $FINN_BUILD_DIR
 echo $FINN_HOST_BUILD_DIR
-./run-docker.sh build_dataflow /home/xband/finn/my_build
+./run-docker.sh build_dataflow /home/xband/finn/my_build_2
 
 如果是临时目录出现问题（一般出现在step13）就跑下面这段指令
 cd ~/finn
@@ -82,7 +82,7 @@ rm -rf /home/xband/finn_tmp/vivado_stitch_proj_*
 rm -rf /home/xband/finn_tmp/vitis_link_proj_*
 rm -rf /home/xband/finn_tmp/code_gen_ipgen_*
 rm -rf /home/xband/finn_tmp/report/*
-rm -rf /home/xband/finn/my_build/output_u250_bitfile_routefix1
+rm -rf /home/xband/finn/my_build/output_u250_bitfile
 
 mkdir -p /home/xband/finn_tmp
 
@@ -101,7 +101,7 @@ export PLATFORM_REPO_PATHS=/opt/xilinx/platforms
 echo "FINN_BUILD_DIR=$FINN_BUILD_DIR"
 echo "FINN_HOST_BUILD_DIR=$FINN_HOST_BUILD_DIR"
 
-./run-docker.sh build_dataflow /home/xband/finn/my_build
+./run-docker.sh build_dataflow /home/xband/finn/my_build_2
 
 
 6.测试模型前检查driver.py（/home/xband/finn/my_build/output_u250_bitfile/deploy/driver/driver.py）文件确保shape和预想的对的上
