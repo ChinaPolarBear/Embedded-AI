@@ -1,0 +1,32 @@
+current mainline variant
+shape: (1,64) -> (1,64)
+hidden: 64
+p_dim_out: 16
+latent: 32
+epochs: 100
+dataset_samples: 1024
+lr: 2e-4
+bitwidths: input 4 / weight 4 / act 4 / output unquantized
+input quant scale from step5:
+- 0.165131882
+
+output dequant scale used for current board comparisons:
+- 0.008486319333314896
+
+current files:
+- deeponet_u250_int4_qonnx.onnx
+- trunk_matrices.npz
+- step4_convert_qonnx_to_finn.py
+- step5_generate_verification.py
+- step6_compare_deploy_output.py
+- plot_output_utils.py
+- pinn_physics_model.py
+
+current mainline verification summary (dequantized, 5 cases):
+- rmse mean: 0.5026618003845215
+- relative_rmse mean: 0.7238522247661552
+- complex_rmse mean: 0.7108711361885071
+- amplitude_rmse mean: 0.5388536334037781
+
+current mainline figures:
+- figures/dequantized_mainline
