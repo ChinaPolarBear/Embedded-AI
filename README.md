@@ -58,15 +58,16 @@ The current repository includes:
 
 - `step4_convert_qonnx_to_finn.py`
   Runs QONNX cleanup / validation internally and then calls `ConvertQONNXtoFINN()` to generate FINN-ONNX.
+  The script is self-contained, so for lab-side Step 4 you only need this file and the raw QONNX model.
 
-- `step5_generate_verification_io.py`
-  Generates one verification case for board-side checking: `input.npy` for the deploy branch input, `ssfm_output.npy` as the clean SSFM reference, and `verification_case.npz` with the full sample metadata.
+- `step5_generate_verification.py`
+  Generates one or more verification cases for board-side checking: `input.npy` for the deploy branch input, `ssfm_output.npy` as the clean SSFM reference, and `verification_case.npz` with the full sample metadata.
 
 - `step6_compare_deploy_output.py`
   Compares decoded runtime / board output against the saved SSFM reference, reports error metrics, and saves comparison figures.
 
 - `finn_qonnx_utils.py`
-  Shared helpers for QONNX export compatibility, graph cleanup, shape/datatype inference, and `Gemm` / `MatMul` validation.
+  Shared helpers used by local export / debugging utilities. Step 4 itself is now self-contained and does not need this file on the lab computer.
 
 ## Generated Artifacts
 
@@ -79,16 +80,19 @@ The current repository includes:
 - `deeponet_u250_int4_qonnx.onnx`
   Raw QONNX export from Step 3. This is the input file for `step4_convert_qonnx_to_finn.py`.
 
-- `verification_io/input.npy`
+- `verification/input.npy`
   Deploy-model input tensor that can be copied into the FINN build directory or used for board-side testing.
 
-- `verification_io/ssfm_output.npy`
+- `verification/input.bin`
+  Board-ready raw input generated from the same sample as `verification/input.npy`.
+
+- `verification/ssfm_output.npy`
   Clean SSFM reference output paired with `input.npy`.
 
-- `verification_io/ssfm_output_probe.npy`
-  Compact complex SSFM reference with shape `[1,256]`: first 128 values are real, last 128 values are imag.
+- `verification/ssfm_output_probe.npy`
+  Compact complex SSFM reference with shape `[1,64]`: first 32 values are real, last 32 values are imag.
 
-- `verification_io/verification_case.npz`
+- `verification/verification_case.npz`
   Full verification bundle containing the waveform, branch input, SSFM reference output, and metadata such as `t_grid`.
 
 - `deeponet_u250_int4_qonnx_finn.onnx`
@@ -120,7 +124,7 @@ Notes:
 
 ### Local Python environment
 
-```bash
+```powershell
 pip install -r requirements.txt
 python test_GPU.py
 ```
@@ -138,7 +142,7 @@ Recommended practical setup:
 
 ### 1. Train the original model
 
-```bash
+```powershell
 python pinn_physics_model.py
 ```
 
@@ -146,74 +150,57 @@ The training script now caches the generated train/test datasets under `dataset_
 
 ### 2. Optional evaluation
 
-```bash
+```powershell
 python test_trained_model.py
 python test_trained_model_csv.py --csv Data_Output/waveform_data_trainmatch.csv --phase-align
 ```
 
 ### 3. Freeze the trunk
 
-```bash
+```powershell
 python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out trunk_matrices.npz
 ```
 
-Bring-up recommendation for a much smaller deployment model:
+Current mainline compact-complex recommendation after `my_build_2` routing success:
 
-```bash
-python step1_export_trunk_matrices.py \
-  --ckpt hybrid_pinn_deeponet.pth \
-  --out trunk_matrices_bringup.npz \
-  --n_t_out 64 \
-  --p_dim_out 16 \
-  --time_slice center
+```powershell
+python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out trunk_matrices.npz --n_t_out 32 --p_dim_out 16 --time_slice uniform
 ```
 
 ### 4. Float deploy sanity check
 
-```bash
+```powershell
 python step2_deploy_float_sanity.py --ckpt hybrid_pinn_deeponet.pth --mat trunk_matrices.npz
 ```
 
 ### 5. Export raw QONNX
 
-```bash
-python step3_brevitas_qat_export_qonnx.py \
-  --mat trunk_matrices.npz \
-  --epochs 10 \
-  --input_bit_width 4 \
-  --weight_bit_width 4 \
-  --act_bit_width 4 \
-  --output_bit_width 4 \
-  --qonnx_out deeponet_u250_int4_qonnx.onnx
+Recommended mainline local export for the current `(1,64)` probe:
+
+```powershell
+python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 100 --dataset_samples 1024 --lr 2e-4 --hidden 64 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
 ```
+
+Why this combination:
+
+- `n_t_out = 32` gives a clearer `(1,64)` board-side waveform view
+- `p_dim_out = 16` keeps `latent = 32`, which matches the routing-safe light variant that already built successfully
+- `hidden = 64` increases branch capacity from the light variant without jumping back to the route-failing heavy model
+- `epochs = 100` and `dataset_samples = 1024` improve model fit without changing hardware structure
+- final output is left unquantized on purpose, so Step 6 can compare a cleaner float-domain output after dequantization
 
 For FINN bring-up, prefer a much smaller model first:
 
-```bash
-python step3_brevitas_qat_export_qonnx.py \
-  --mat trunk_matrices_bringup.npz \
-  --epochs 1 \
-  --dataset_samples 32 \
-  --hidden 32 \
-  --input_bit_width 4 \
-  --weight_bit_width 4 \
-  --act_bit_width 4 \
-  --output_bit_width 4 \
-  --qonnx_out deeponet_u250_bringup_qonnx.onnx
+```powershell
+python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices_bringup.npz --epochs 1 --dataset_samples 32 --hidden 32 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --output_bit_width 4 --qonnx_out deeponet_u250_bringup_qonnx.onnx
 ```
 
 If you only want to validate the FINN tool flow and not the model quality yet, `--epochs 0` is also acceptable.
 
 Step 3 now tries to reuse the training cache first and only rebuilds a separate supervised dataset if that cache is missing. You can force a refresh with:
 
-```bash
-python step3_brevitas_qat_export_qonnx.py \
-  --mat trunk_matrices.npz \
-  --input_bit_width 4 \
-  --weight_bit_width 4 \
-  --act_bit_width 4 \
-  --output_bit_width 4 \
-  --force_rebuild_cache
+```powershell
+python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --output_bit_width 4 --force_rebuild_cache
 ```
 
 What Step 3 now does:
@@ -223,8 +210,8 @@ What Step 3 now does:
 - uses signed int4 input quantization
 - uses unsigned int4 quantized `ReLU` activations
 - can explicitly quantize the final output tensor to signed int4
-- uses a board-probe deploy interface with input `[B,256]`: first 128 values are real(A(0,t_probe)), last 128 values are imag(A(0,t_probe))
-- exports one `[B,256]` tensor: first 128 values are real(A(L,t_probe)), last 128 values are imag(A(L,t_probe))
+- uses a board-probe deploy interface with input `[B,64]`: first 32 values are real(A(0,t_probe)), last 32 values are imag(A(0,t_probe))
+- exports one `[B,64]` tensor: first 32 values are real(A(L,t_probe)), last 32 values are imag(A(L,t_probe))
 
 ### 6. Convert QONNX to FINN-ONNX (Step 4)
 
@@ -284,6 +271,7 @@ Recommended workflow while debugging:
 Important notes:
 
 - `step4_convert_qonnx_to_finn.py` should be run inside the FINN Linux / Docker environment.
+- For lab-side Step 4, copy only `deeponet_u250_int4_qonnx.onnx` and `step4_convert_qonnx_to_finn.py`.
 - The current local Python environment is suitable for Steps 1 to 3, but not for the actual FINN conversion unless `finn` is installed there.
 - The final FINN-ONNX file is the model you should feed into `build_dataflow`.
 
@@ -402,7 +390,7 @@ Then run the build from the FINN root directory:
 ```json
 {
   "output_dir": "output_u250_bitfile",
-  "synth_clk_period_ns": 5.0,
+  "synth_clk_period_ns": 10.0,
   "fpga_part": "xcu250-figd2104-2L-e",
   "shell_flow_type": "vitis_alveo",
   "vitis_platform": "xilinx_u250_gen3x16_xdma_4_1_202210_1",
@@ -490,35 +478,60 @@ This is the missing step if you want a board-side validation case that starts fr
 
 This step only needs the normal local Python environment. It does not execute the exported ONNX model and does not require `qonnx`.
 
-```bash
-python step5_generate_verification_io.py \
-  --out_dir verification_io \
-  --source random \
-  --seed 123
+```powershell
+python step5_generate_verification.py --out_dir verification --source random --seed 123
 ```
 
 This will generate:
 
-- `verification_io/input.npy`
-- `verification_io/ssfm_output.npy`
-- `verification_io/ssfm_output_probe.npy`
-- `verification_io/verification_case.npz`
+- `verification/input.npy`
+- `verification/input_int4.npy`
+- `verification/input.bin`
+- `verification/ssfm_output.npy`
+- `verification/ssfm_output_probe.npy`
+- `verification/verification_case.npz`
+
+If you want multiple independent cases while keeping the folder clean:
+
+```powershell
+python step5_generate_verification.py --out_dir verification --source random --seed 123 --num_cases 5
+```
+
+That mode creates:
+
+- `verification/case_000/`
+- `verification/case_001/`
+- `verification/case_002/`
+- ...
+- `verification/cases_manifest.json`
+
+Each `case_xxx` subdirectory contains its own `input.bin`, `input.npy`, `input_int4.npy`, `ssfm_output.npy`, `ssfm_output_probe.npy`, and `verification_case.npz`.
 
 Recommended practical use:
 
-- feed `input.npy` to the board/runtime path as the deploy-model branch input
-- keep `ssfm_output.npy` and `verification_case.npz` on the host side as the clean reference bundle
-- if the board host later requires a quantized/raw input representation, add that board-specific conversion in the host/runtime layer rather than changing the reference case generation
+- copy `verification/input.bin` to the board/runtime path as the deploy-model input
+- keep `verification/input.npy`, `verification/ssfm_output.npy`, and `verification/verification_case.npz` on the host side as the clean reference bundle
+- `verification/input.bin` and `verification_case.npz` now always refer to the same single sample
 
 ### 9. Compare board/runtime output against the reference
 
 After running the model on hardware or through the final runtime stack, save the decoded returned tensor as `board_output.npy` and compare it with:
 
-```bash
-python step6_compare_deploy_output.py \
-  --case verification_io/verification_case.npz \
-  --actual board_output.npy
+```powershell
+python step6_compare_deploy_output.py --case verification/verification_case.npz --actual board_output.npy
 ```
+
+If you generated multiple verification cases with `step5_generate_verification.py --num_cases N`, and you place one decoded runtime output file into each `verification/case_xxx/` directory, you can compare all of them in one pass:
+
+```powershell
+python step6_compare_deploy_output.py --cases_dir verification --actual_name output.npy
+```
+
+That batch mode writes:
+
+- one figure subdirectory per case
+- `batch_summary.json`
+- `batch_summary.csv`
 
 The script reports:
 
@@ -533,9 +546,9 @@ The script reports:
 
 Important:
 
-- `board_output.npy` must already be decoded/dequantized into `[B,256]` float for the current compact-complex probe, or into one of the older complex forms `[B,2,N_t]`, `[B,N_t,2]`, flattened `[B,2*N_t]`, `[2,N_t]`, `[N_t,2]`, flattened `[2*N_t]`, or complex waveform form
-- for the current board-probe deploy output, use `[1,256]`: `output[0,0:128]` is real(A(L,t_probe)) and `output[0,128:256]` is imag(A(L,t_probe))
-- raw board-specific integer dumps such as `(1, 256) int32` are not self-describing enough for this script and must be decoded/dequantized first by the board host code
+- `board_output.npy` must already be decoded/dequantized into `[B,64]` float for the current compact-complex probe, or into one of the older complex forms `[B,2,N_t]`, `[B,N_t,2]`, flattened `[B,2*N_t]`, `[2,N_t]`, `[N_t,2]`, flattened `[2*N_t]`, or complex waveform form
+- for the current board-probe deploy output, use `[1,64]`: `output[0,0:32]` is real(A(L,t_probe)) and `output[0,32:64]` is imag(A(L,t_probe))
+- raw board-specific integer dumps such as `(1, 64) int16` or `(1, 64) int32` are not self-describing enough for this script and must be decoded/dequantized first by the board host code
 
 This is the point where you can honestly say the deployed FPGA path has been functionally checked against the SSFM reference, rather than only synthesized and packaged.
 
@@ -559,12 +572,3 @@ The new QONNX preparation step explicitly validates:
 - bias initializer presence
 - whether `Gemm` / `MatMul` weights are initializer-backed or QONNX constant-like tensors
 
-## Quick Commands
-
-```bash
-python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out trunk_matrices.npz
-python step2_deploy_float_sanity.py --ckpt hybrid_pinn_deeponet.pth --mat trunk_matrices.npz
-python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 10 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --output_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
-# Step 4 takes the raw Step 3 QONNX as input and writes only the FINN-ONNX output.
-python step4_convert_qonnx_to_finn.py --qonnx_in deeponet_u250_int4_qonnx.onnx
-```

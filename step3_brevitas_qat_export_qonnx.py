@@ -1,7 +1,8 @@
 # Step 3
 # pip install brevitas qonnx onnx onnxruntime onnxoptimizer
 
-# python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 10 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --output_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
+# recommended mainline after my_build_2 success: hidden 64, latent 32 (via step1 p_dim_out 16), epochs 100
+# python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 200 --dataset_samples 1024 --lr 2e-4 --hidden 64 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
 
 import argparse
 from dataclasses import dataclass
@@ -48,7 +49,7 @@ class BranchMLPQuant(nn.Module):
     """
     FINN-friendly branch:
       signed input quant -> QuantLinear -> Uint8 QuantReLU -> QuantLinear -> Uint8 QuantReLU -> QuantLinear
-    Input:  [B, 2*N_t]
+    Input:  [B, 2*N_deploy]
     Output: [B, 2P]
     """
 
@@ -105,31 +106,36 @@ class BranchMLPQuant(nn.Module):
 class DeepONetFinnDeployQuant(nn.Module):
     """
     Full deploy model for FINN:
-      u_in -> BranchMLPQuant -> b(2P) -> 1 fixed-weight QuantLinear layer -> [B, 2*N_t]
+      u_in -> BranchMLPQuant -> b(2P) -> 1 fixed-weight QuantLinear layer -> [B, 2*N_deploy]
 
     Output layout:
-      out[:, :N_t]  = real(A(L,t))
-      out[:, N_t:]  = imag(A(L,t))
+      out[:, :N_deploy]  = real(A(L,t_deploy))
+      out[:, N_deploy:]  = imag(A(L,t_deploy))
     """
 
     def __init__(self, M_real: torch.Tensor, M_imag: torch.Tensor, hidden: int, quant_cfg: QuantConfig):
         super().__init__()
         assert M_real.shape == M_imag.shape
-        n_t, two_p = M_real.shape
-        self.n_t = n_t
+        n_t_deploy, two_p = M_real.shape
+        self.n_t = n_t_deploy
         self.two_p = two_p
         self.quant_cfg = quant_cfg
 
         self.branch = BranchMLPQuant(
-            in_dim=2 * pm.N_t,
+            in_dim=2 * n_t_deploy,
             hidden=hidden,
             out_dim=two_p,
             quant_cfg=quant_cfg,
         )
+        self.latent_quant = QuantIdentity(
+            act_quant=Int8ActPerTensorFloat,
+            bit_width=quant_cfg.act_bit_width,
+            return_quant_tensor=True,
+        )
 
         self.out_fc = QuantLinear(
             two_p,
-            2 * n_t,
+            2 * n_t_deploy,
             weight_quant=Int8WeightPerTensorFloat,
             weight_bit_width=quant_cfg.weight_bit_width,
             bias=False,
@@ -143,7 +149,6 @@ class DeepONetFinnDeployQuant(nn.Module):
             )
 
         with torch.no_grad():
-            # Keep a single 512-wide output stream for FINN driver generation.
             self.out_fc.weight.copy_(torch.cat([M_real, M_imag], dim=0))
 
         for param in self.out_fc.parameters():
@@ -151,21 +156,22 @@ class DeepONetFinnDeployQuant(nn.Module):
 
     def forward(self, u_in):
         branch_out = self.branch(u_in)
+        branch_out = self.latent_quant(branch_out)
         out = self.out_fc(branch_out)
         if self.output_quant is not None:
             out = self.output_quant(out)
         return out
 
 
-def crop_targets(AL_clean_batch: torch.Tensor, n_t_out: int, time_indices: torch.Tensor | None):
+def crop_complex_batch(batch: torch.Tensor, n_t_out: int, time_indices: torch.Tensor | None):
     if n_t_out == pm.N_t and time_indices is None:
-        return AL_clean_batch
+        return batch
 
     if time_indices is not None:
-        return AL_clean_batch[:, time_indices]
+        return batch[:, time_indices]
 
     start = (pm.N_t - n_t_out) // 2
-    return AL_clean_batch[:, start:start + n_t_out]
+    return batch[:, start:start + n_t_out]
 
 
 def make_supervised_batch(
@@ -177,21 +183,21 @@ def make_supervised_batch(
     """
     A0_batch, AL_clean_batch: complex [B, N_t]
     returns:
-      u_in: [B, 2*N_t]
-      y_real,y_imag: [B, n_t_out]
+      u_in: [B, 2*n_t_out]
+      y_out: [B, 2*n_t_out]
     """
-    AL_clean_batch = crop_targets(AL_clean_batch, n_t_out, time_indices)
-    u_in = pm.make_branch_input(A0_batch)
-    y_real = AL_clean_batch.real
-    y_imag = AL_clean_batch.imag
-    return u_in.float(), y_real.float(), y_imag.float()
+    A0_batch = crop_complex_batch(A0_batch, n_t_out, time_indices)
+    AL_clean_batch = crop_complex_batch(AL_clean_batch, n_t_out, time_indices)
+    u_in = torch.cat([A0_batch.real, A0_batch.imag], dim=1)
+    y_out = torch.cat([AL_clean_batch.real, AL_clean_batch.imag], dim=1)
+    return u_in.float(), y_out.float()
 
 
 def export_model_to_qonnx(model: nn.Module, qonnx_out: str) -> None:
     ensure_brevitas_qonnx_export_support()
 
     export_model = model.cpu().eval()
-    dummy = torch.zeros(1, 2 * pm.N_t, dtype=torch.float32)
+    dummy = torch.zeros(1, 2 * model.n_t, dtype=torch.float32)
 
     export_qonnx(
         export_model,
@@ -205,7 +211,7 @@ def export_model_to_qonnx(model: nn.Module, qonnx_out: str) -> None:
 
     print(f"[OK] Exported raw QONNX -> {qonnx_out}")
     print_initializer_shapes(qonnx_out)
-    print("Next: run step4.1_export_QONNX_ready_model.py before ConvertQONNXtoFINN().")
+    print("Next: run step4_convert_qonnx_to_finn.py with this raw QONNX as input.")
 
 
 def load_supervised_dataset(n_samples: int, snr_db: float, force_rebuild_cache: bool):
@@ -260,6 +266,10 @@ def main(
     if "time_indices" in data.files:
         time_indices = torch.from_numpy(data["time_indices"]).long().to(device)
     n_t_out = int(M_real.shape[0])
+    if time_indices is not None and int(time_indices.numel()) != n_t_out:
+        raise ValueError(
+            f"time_indices length {int(time_indices.numel())} does not match M_real rows {n_t_out}"
+        )
 
     print(f"[INFO] Quantization config: {quant_cfg.describe()}")
     if output_bit_width is None:
@@ -287,18 +297,18 @@ def main(
         total = 0.0
         for i in range(0, A0.shape[0], 32):
             idx = perm[i : i + 32]
-            u_in, y_r, y_i = make_supervised_batch(A0[idx], AL_clean[idx], n_t_out, time_indices)
+            u_in, y_out = make_supervised_batch(A0[idx], AL_clean[idx], n_t_out, time_indices)
             pred = model(u_in)
-            pred_r = pred[:, :n_t_out]
-            pred_i = pred[:, n_t_out : 2 * n_t_out]
-            loss = ((pred_r - y_r) ** 2 + (pred_i - y_i) ** 2).mean()
+            loss = ((pred - y_out) ** 2).mean()
 
             opt.zero_grad(set_to_none=True)
             loss.backward()
             opt.step()
             total += loss.item()
 
-        print(f"epoch {ep:03d}: loss={total * 32 / A0.shape[0]:.6e}")
+        avg_loss = total * 32 / A0.shape[0]
+        if ep == 1 or ep % 10 == 0 or ep == epochs:
+            print(f"epoch {ep:03d}: loss={avg_loss:.6e}")
 
     export_model_to_qonnx(model, qonnx_out=qonnx_out)
 
@@ -307,7 +317,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--mat", type=str, required=True)
     ap.add_argument("--epochs", type=int, default=10)
-    ap.add_argument("--qonnx_out", type=str, default="deeponet_u250_int8_qonnx.onnx")
+    ap.add_argument("--qonnx_out", type=str, default="deeponet_u250_int4_qonnx.onnx")
     ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--dataset_samples", type=int, default=256)
     ap.add_argument("--force_rebuild_cache", action="store_true")

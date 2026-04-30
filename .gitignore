@@ -30,10 +30,12 @@ figures/
 *.onnx
 *.npz
 *.npy
-
-# Verification outputs
-verification_io/
-verification_io_*/
+*.bin
+# Verification Inputs & outputs
+verification/
 
 # Local duplicate readme
 README
+
+#lighter model
+my_build_2/
