@@ -1,16 +1,26 @@
-﻿0. 切换shell（切换前需要重启电脑）
+0. Switch the shell if needed
 
-如果需要切到board生成output所需的 shell
+Reboot the machine before switching shells if your system requires it.
+
+If you need the shell used for board-side `output.bin` generation:
+
+```bash
 sudo /opt/xilinx/xrt/bin/xbmgmt program --device 65:00.0 --shell /lib/firmware/xilinx/12c8fafb0632499db1c0c6676271b8a6/partition.xsabin
 sudo /opt/xilinx/xrt/bin/xbutil examine
+```
 
-如果需要切回到跑dataflow需要的shell
+If you need to switch back to the shell used for `build_dataflow`:
+
+```bash
 sudo /opt/xilinx/xrt/bin/xbmgmt program --device 65:00.0 --shell /lib/firmware/xilinx/f8dac62e49d9b0aae9fc6f260d9d0dfb/partition.xsabin
 sudo /opt/xilinx/xrt/bin/xbutil examine
+```
 
+1. Run `quicktest` once, then enter Docker
 
-1.先跑一遍quicktest，然后进入docker（可以先尝试第二步，不行的话再返回跑这个）
+You can try Step 2 first. If Docker does not come up cleanly, come back and run this:
 
+```bash
 cd ~
 mkdir -p ~/finn_tmp
 
@@ -26,25 +36,40 @@ docker version
 docker ps
 
 ./run-docker.sh quicktest
+```
 
+2. Enter Docker
 
-2.进入docker就可以运行python文件了
+Once the environment is ready, enter the FINN Docker shell:
 
+```bash
 cd ~/finn
 export FINN_BUILD_DIR=~/finn_tmp
 ./run-docker.sh
+```
 
+3. Unzip the package into `my_build` and run Step 4
 
-3.zip压缩包放到my_build_2文件夹中然后解压，解压后会看到两个文件，deeponet_u250_int4_qonnx.onnx,step4_convert_qonnx_to_finn.py
-运行以下代码，完成后会生成deeponet_u250_int4_qonnx_finn.onnx，将其更名为model.onnx,记得把旧的model.onnx删掉！！！！
+Copy the ZIP package into `my_build` and extract it. After extraction you should see:
 
-cd my_build_2
+- `deeponet_u250_int4_qonnx.onnx`
+- `step4_convert_qonnx_to_finn.py`
+
+Run:
+
+```bash
+cd my_build
 python step4_convert_qonnx_to_finn.py --qonnx_in deeponet_u250_int4_qonnx.onnx
+```
 
+This will generate `deeponet_u250_int4_qonnx_finn.onnx`.
 
-4.接下来就开始build dataflow,先检查环境
+Rename that file to `model.onnx`, and delete the old `model.onnx` first if one is already there.
 
-cd /home/xband/finn/my_build_2
+4. Check the build environment
+
+```bash
+cd /home/xband/finn/my_build
 
 export FINN_XILINX_PATH=/opt/Xilinx
 export FINN_XILINX_VERSION=2022.2
@@ -52,15 +77,18 @@ export VIVADO_PATH=/opt/Xilinx/Vivado/2022.2
 export VITIS_PATH=/opt/Xilinx/Vitis/2022.2
 export HLS_PATH=/opt/Xilinx/Vitis_HLS/2022.2
 export PLATFORM_REPO_PATHS=/opt/xilinx/platforms
-#export NUM_DEFAULT_WORKERS=1 (add it if the system is shutted down)
+# export NUM_DEFAULT_WORKERS=1   # only add this if the machine tends to shut down
 
 source /opt/Xilinx/Vivado/2022.2/settings64.sh
 source /opt/Xilinx/Vitis/2022.2/settings64.sh
 source /opt/Xilinx/Vitis_HLS/2022.2/settings64.sh
+```
 
+5. Run `my_build`
 
-5.开始run my_build_2这一步会花费大概两个半小时祝你们好运
+This step usually takes around two and a half hours.
 
+```bash
 cd ~/finn
 
 mkdir -p ~/finn_tmp
@@ -73,16 +101,19 @@ export FINN_HOST_BUILD_DIR=/home/xband/finn_tmp
 
 echo $FINN_BUILD_DIR
 echo $FINN_HOST_BUILD_DIR
-./run-docker.sh build_dataflow /home/xband/finn/my_build_2
+./run-docker.sh build_dataflow /home/xband/finn/my_build
+```
 
-如果是临时目录出现问题（一般出现在step13）就跑下面这段指令
+If a temporary-directory problem appears, usually around Step 13, run this cleanup and retry:
+
+```bash
 cd ~/finn
 
 rm -rf /home/xband/finn_tmp/vivado_stitch_proj_*
 rm -rf /home/xband/finn_tmp/vitis_link_proj_*
 rm -rf /home/xband/finn_tmp/code_gen_ipgen_*
 rm -rf /home/xband/finn_tmp/report/*
-rm -rf /home/xband/finn/my_build_2/output_u250_bitfile_2
+rm -rf /home/xband/finn/my_build/output_u250_bitfile_routefix1
 
 mkdir -p /home/xband/finn_tmp
 
@@ -101,13 +132,21 @@ export PLATFORM_REPO_PATHS=/opt/xilinx/platforms
 echo "FINN_BUILD_DIR=$FINN_BUILD_DIR"
 echo "FINN_HOST_BUILD_DIR=$FINN_HOST_BUILD_DIR"
 
-./run-docker.sh build_dataflow /home/xband/finn/my_build_2
+./run-docker.sh build_dataflow /home/xband/finn/my_build
+```
 
+6. Check `driver.py` before running the accelerator
 
-6.测试模型前检查driver.py（/home/xband/finn/my_build_2/output_u250_bitfile/deploy/driver/driver.py）文件确保shape和预想的对的上
+Before runtime testing, inspect:
 
-测试代码请移步 
-板端生成output代码.txt
+```text
+/home/xband/finn/my_build/output_u250_bitfile/deploy/driver/driver.py
+```
 
+Make sure the shapes match what you expect.
 
+For the runtime test itself, see:
 
+```text
+board_output_generation_my_build.txt
+```

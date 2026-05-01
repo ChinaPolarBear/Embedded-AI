@@ -1,68 +1,75 @@
-板端生成 `output.bin` 的最小流程（`my_build_2` 轻量版）
+Minimal process to generate `output.bin` on the board
+Compact-complex probe version: INT4 input, expected INT16 output
 
-当前这份说明对应：
+Current output convention:
 
-- build 目录：`/home/xband/finn/my_build_2`
-- deploy 目录：`/home/xband/finn/my_build_2/output_u250_bitfile_2/deploy/driver`
-- 模型布局：compact complex
-- 输入 shape：`(1, 64)`
-- 输出 shape：`(1, 64)`
-- 语义约定：
-  - `output[0, 0:32] = real(A(L, t_probe))`
-  - `output[0, 32:64] = imag(A(L, t_probe))`
+- output shape: `(1, 64)`
+- `output[0, 0:32] = real(A(L, t_probe))`
+- `output[0, 32:64] = imag(A(L, t_probe))`
 
-先确认新 build 的 `driver.py`：
-
-```bash
-cd /home/xband/finn/my_build_2/output_u250_bitfile_2/deploy/driver
-grep -n "idt\|odt\|ishape_normal\|oshape_normal\|ishape_packed\|oshape_packed" driver.py
-```
-
-理想情况下你会看到：
+After rerunning FINN `build_dataflow`, open the generated `driver.py` and confirm:
 
 ```text
 idt = INT4
 ishape_normal = (1, 64)
 oshape_normal = (1, 64)
-odt = INT16
 ```
 
-如果 `odt = INT16`，下面这份 C++/Python 解码代码可以直接用。
+If `driver.py` shows:
 
-预期大小：
+```text
+odt = INT16
+oshape_packed = (1, 16, 2)
+```
 
-- `input.bin`：`1 * 64 * 1 = 64 bytes`
-- `output.bin`：`1 * 64 * 2 = 128 bytes`
+then the expected file sizes are:
 
-目录里需要有：
+- `input.bin`: `1 * 64 * 1 = 64 bytes`
+- `output.bin`: `1 * 64 * 2 = 128 bytes`
+
+Decoded `output.npy` should have shape `(1, 64)`.
+All 64 scalars follow compact-complex layout: first 32 real, last 32 imag.
+
+If your actual `driver.py` uses an `odt` other than `INT16`, follow the values in
+`driver.py` instead. The C++ and Python code below assume `INT16`.
+
+Driver directory:
+
+```text
+/home/xband/finn/my_build/output_u250_bitfile/deploy/driver
+```
+
+That directory must contain:
 
 - `input.bin`
 - `../bitfile/finn-accel.xclbin`
 
-运行 Python 前建议先进入 runtime 环境：
+Before running Python, it is recommended to enter the runtime environment:
 
 ```bash
 source ~/finn_runtime_env/bin/activate
 ```
 
-第 0 步：如果需要切换 shell
+Step 0: switch shell if needed
+
+If you need the shell used for board-side output generation:
 
 ```bash
 sudo /opt/xilinx/xrt/bin/xbmgmt program --device 65:00.0 --shell /lib/firmware/xilinx/12c8fafb0632499db1c0c6676271b8a6/partition.xsabin
 sudo /opt/xilinx/xrt/bin/xbutil examine
 ```
 
-如果需要切回 dataflow 所需 shell：
+If you need to switch back to the shell used for `build_dataflow`:
 
 ```bash
 sudo /opt/xilinx/xrt/bin/xbmgmt program --device 65:00.0 --shell /lib/firmware/xilinx/f8dac62e49d9b0aae9fc6f260d9d0dfb/partition.xsabin
 sudo /opt/xilinx/xrt/bin/xbutil examine
 ```
 
-第 1 步：确认 `input.bin` 大小
+Step 1: verify `input.bin` size
 
 ```bash
-cd /home/xband/finn/my_build_2/output_u250_bitfile_2/deploy/driver
+cd /home/xband/finn/my_build/output_u250_bitfile/deploy/driver
 python3 - <<'PY'
 from pathlib import Path
 
@@ -78,14 +85,14 @@ print("input.bin size check passed")
 PY
 ```
 
-第 2 步：保存下面这个板端 XRT 程序为 `run_finn_xrt.cpp`
+Step 2: save the following XRT program as `run_finn_xrt.cpp`
 
 ```bash
-cd /home/xband/finn/my_build_2/output_u250_bitfile_2/deploy/driver
+cd /home/xband/finn/my_build/output_u250_bitfile/deploy/driver
 nano run_finn_xrt.cpp
 ```
 
-粘贴下面代码：
+Paste this code:
 
 ```cpp
 #include <fstream>
@@ -207,34 +214,34 @@ int main() {
 }
 ```
 
-保存退出：
+Save and exit:
 
 ```text
-ctrl+o
+Ctrl+O
 Enter
-ctrl+x
+Ctrl+X
 ```
 
-第 3 步：编译 XRT 程序
+Step 3: compile the XRT program
 
 ```bash
 source /opt/xilinx/xrt/setup.sh
-cd /home/xband/finn/my_build_2/output_u250_bitfile_2/deploy/driver
+cd /home/xband/finn/my_build/output_u250_bitfile/deploy/driver
 g++ -std=c++17 run_finn_xrt.cpp -o run_finn_xrt -I/opt/xilinx/xrt/include -L/opt/xilinx/xrt/lib -lxrt_coreutil
 ```
 
-第 4 步：运行板端程序，生成 `output.bin`
+Step 4: run the board-side program to generate `output.bin`
 
 ```bash
-cd /home/xband/finn/my_build_2/output_u250_bitfile_2/deploy/driver
+cd /home/xband/finn/my_build/output_u250_bitfile/deploy/driver
 source /opt/xilinx/xrt/setup.sh
 ./run_finn_xrt
 ```
 
-第 5 步：快速检查 `output.bin`，并按 `(1,64)` 解码
+Step 5: quick check of `output.bin` and decode it as `(1, 64)`
 
 ```bash
-cd /home/xband/finn/my_build_2/output_u250_bitfile_2/deploy/driver
+cd /home/xband/finn/my_build/output_u250_bitfile/deploy/driver
 python3 - <<'PY'
 from pathlib import Path
 import numpy as np
@@ -264,15 +271,16 @@ print("imag nonzero:", np.count_nonzero(y_raw[0, 32:]))
 PY
 ```
 
-第 6 步：把结果发回本地
+Step 6: send the result back to the host machine
 
-优先发：
+Prefer sending:
 
 - `output.bin`
 
-如果方便，也一起发：
+If convenient, also send:
 
 - `output_raw_int16_1x64.npy`
 - `output.npy`
 
-我会在本地按 `(1,64)` 的 compact complex 结构重新解码和验证。
+The host side can then decode and validate the result again using the `(1,64)`
+compact-complex layout.

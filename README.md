@@ -304,7 +304,7 @@ Copy the FINN-ONNX model and rename it exactly to `model.onnx`:
 
 #### Minimal terminal workflow
 
-运行的时候确保是在finn/my_build的路径下运行，尤其是修改json文件内容的时候
+
 Inside the FINN environment, the practical workflow used in this project is:
 
 ```bash

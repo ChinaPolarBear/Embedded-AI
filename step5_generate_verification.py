@@ -356,6 +356,7 @@ def _cleanup_previous_runtime_outputs(out_dir_path: Path) -> list[str]:
         "output.npy",
         "output_dequant.npy",
         "output_raw*.npy",
+        "local_qonnx_output.npy",
     ]
 
     for pattern in patterns:
