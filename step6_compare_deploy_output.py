@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+from datetime import datetime
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -249,6 +250,15 @@ def _describe_actual_kind(actual_path: Path) -> str:
     if name == "output.npy":
         return "raw"
     return "provided"
+
+
+def _default_output_dir(actual_kind: str) -> Path:
+    if actual_kind == "dequantized":
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = Path(__file__).resolve().parent / "figures" / "dequantized_mainline" / timestamp
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return output_dir
+    return make_figure_output_dir(__file__)
 
 
 def _plot_amplitude(
@@ -499,7 +509,7 @@ def _run_single_case(
     metrics["rtol"] = float(rtol)
 
     if output_dir is None:
-        figures_dir = make_figure_output_dir(__file__)
+        figures_dir = _default_output_dir(actual_kind)
     else:
         figures_dir = Path(output_dir).resolve()
         figures_dir.mkdir(parents=True, exist_ok=True)
@@ -564,8 +574,9 @@ def _run_batch_cases(
     if not case_dirs:
         raise FileNotFoundError(f"No case_* directories found under: {cases_root}")
 
+    inferred_kind = _describe_actual_kind(Path(actual_name))
     if output_dir is None:
-        batch_output_dir = make_figure_output_dir(__file__)
+        batch_output_dir = _default_output_dir(inferred_kind)
     else:
         batch_output_dir = Path(output_dir).resolve()
         batch_output_dir.mkdir(parents=True, exist_ok=True)
