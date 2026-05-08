@@ -3,32 +3,31 @@ Compact-complex probe version: INT4 input, expected INT16 output
 
 Current output convention:
 
-- output shape: `(1, 64)`
-- `output[0, 0:32] = real(A(L, t_probe))`
-- `output[0, 32:64] = imag(A(L, t_probe))`
+- output shape: `(1, 256)`
+- `output[0, 0:128] = real(A(L, t_probe))`
+- `output[0, 128:256] = imag(A(L, t_probe))`
 
 After rerunning FINN `build_dataflow`, open the generated `driver.py` and confirm:
 
 ```text
 idt = INT4
-ishape_normal = (1, 64)
-oshape_normal = (1, 64)
+ishape_normal = (1, 256)
+oshape_normal = (1, 256)
 ```
 
-If `driver.py` shows:
+If `driver.py` also shows:
 
 ```text
 odt = INT16
-oshape_packed = (1, 16, 2)
 ```
 
 then the expected file sizes are:
 
-- `input.bin`: `1 * 64 * 1 = 64 bytes`
-- `output.bin`: `1 * 64 * 2 = 128 bytes`
+- `input.bin`: `1 * 256 * 1 = 256 bytes`
+- `output.bin`: `1 * 256 * 2 = 512 bytes`
 
-Decoded `output.npy` should have shape `(1, 64)`.
-All 64 scalars follow compact-complex layout: first 32 real, last 32 imag.
+Decoded `output.npy` should have shape `(1, 256)`.
+All 256 scalars follow compact-complex layout: first 128 real, last 128 imag.
 
 If your actual `driver.py` uses an `odt` other than `INT16`, follow the values in
 `driver.py` instead. The C++ and Python code below assume `INT16`.
@@ -79,8 +78,8 @@ if not p.is_file():
 
 size = p.stat().st_size
 print("input.bin bytes:", size)
-if size != 64:
-    raise RuntimeError(f"Expected input.bin to be 64 bytes for INT4 packed input, got {size}")
+if size != 256:
+    raise RuntimeError(f"Expected input.bin to be 256 bytes for INT4 packed input, got {size}")
 print("input.bin size check passed")
 PY
 ```
@@ -131,8 +130,8 @@ int main() {
         const std::string input_path = "input.bin";
         const std::string output_path = "output.bin";
 
-        const size_t input_bytes = 1 * 64 * 1;
-        const size_t output_elems = 1 * 64;
+        const size_t input_bytes = 1 * 256 * 1;
+        const size_t output_elems = 1 * 256;
         const size_t bytes_per_output_elem = 2;
         const size_t output_bytes = output_elems * bytes_per_output_elem;
         const uint32_t numReps = 1;
@@ -202,8 +201,8 @@ int main() {
 
         std::cout << "Done. Output saved to " << output_path << std::endl;
         std::cout << "Expected input bytes: " << input_bytes << std::endl;
-        std::cout << "Expected output tensor shape: (1, 64)" << std::endl;
-        std::cout << "Expected output layout: first 32 real, last 32 imag" << std::endl;
+        std::cout << "Expected output tensor shape: (1, 256)" << std::endl;
+        std::cout << "Expected output layout: first 128 real, last 128 imag" << std::endl;
         std::cout << "Expected output datatype: INT16" << std::endl;
         std::cout << "Expected output bytes: " << output_bytes << std::endl;
         return 0;
@@ -238,7 +237,7 @@ source /opt/xilinx/xrt/setup.sh
 ./run_finn_xrt
 ```
 
-Step 5: quick check of `output.bin` and decode it as `(1, 64)`
+Step 5: quick check of `output.bin` and decode it as `(1, 256)`
 
 ```bash
 cd /home/xband/finn/my_build/output_u250_bitfile/deploy/driver
@@ -252,38 +251,38 @@ if not p.is_file():
 
 raw = np.fromfile("output.bin", dtype=np.uint8)
 print("raw bytes:", raw.size)
-if raw.size != 128:
-    raise RuntimeError(f"Expected 128 bytes for INT16 (1,64), got {raw.size}")
+if raw.size != 512:
+    raise RuntimeError(f"Expected 512 bytes for INT16 (1,256), got {raw.size}")
 
-y_raw = np.fromfile("output.bin", dtype="<i2").astype(np.int32).reshape(1, 64)
-np.save("output_raw_int16_1x64.npy", y_raw)
+y_raw = np.fromfile("output.bin", dtype="<i2").astype(np.int32).reshape(1, 256)
+np.save("output_raw_int16_1x256.npy", y_raw)
 np.save("output.npy", y_raw.astype(np.float32))
 
-print("Saved output_raw_int16_1x64.npy")
+print("Saved output_raw_int16_1x256.npy")
 print("Saved output.npy")
 print("output_raw shape:", y_raw.shape)
 print("output_raw dtype:", y_raw.dtype)
 print("output_raw min/max:", y_raw.min(), y_raw.max())
 print("real first 16:", y_raw[0, :16])
-print("imag first 16:", y_raw[0, 32:48])
-print("real nonzero:", np.count_nonzero(y_raw[0, :32]))
-print("imag nonzero:", np.count_nonzero(y_raw[0, 32:]))
+print("imag first 16:", y_raw[0, 128:144])
+print("real nonzero:", np.count_nonzero(y_raw[0, :128]))
+print("imag nonzero:", np.count_nonzero(y_raw[0, 128:]))
 PY
 ```
 
 Step 6: dequantize on the host machine
 
-After copying `output.bin` or `output_raw_int16_1x64.npy` back into this
+After copying `output.bin` or `output_raw_int16_1x256.npy` back into this
 repository, run:
 
 ```powershell
-python dequantize_board_output.py --model deeponet_u250_int4_qonnx.onnx --input verification/case_000/output_raw_int16_1x64.npy
+python dequantize_board_output.py --model deeponet_u250_int4_qonnx.onnx --input verification/case_000/output_raw_int16_1x256.npy
 ```
 
 For all verification cases at once:
 
 ```powershell
-python dequantize_board_output.py --model deeponet_u250_int4_qonnx.onnx --cases_dir verification --input_name output_raw_int16_1x64.npy
+python dequantize_board_output.py --model deeponet_u250_int4_qonnx.onnx --cases_dir verification --input_name output_raw_int16_1x256.npy
 ```
 
 This writes `output_dequant.npy`, which can then be passed directly to
@@ -297,8 +296,8 @@ Prefer sending:
 
 If convenient, also send:
 
-- `output_raw_int16_1x64.npy`
+- `output_raw_int16_1x256.npy`
 - `output.npy`
 
 The host side can then dequantize and validate the result again using the
-`(1,64)` compact-complex layout.
+`(1,256)` compact-complex layout.
