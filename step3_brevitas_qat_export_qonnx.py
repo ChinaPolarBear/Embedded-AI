@@ -1,8 +1,8 @@
 # Step 3
 # pip install brevitas qonnx onnx onnxruntime onnxoptimizer
 
-# recommended mainline after my_build_2 success: hidden 64, latent 32 (via step1 p_dim_out 16), epochs 100
-# python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 200 --dataset_samples 1024 --lr 2e-4 --hidden 64 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
+# next recommended mainline experiment: hidden 64, latent 32 (via step1 p_dim_out 16), epochs 150, dataset_samples 2048
+# python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 150 --dataset_samples 2048 --lr 2e-4 --hidden 64 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
 
 import argparse
 from dataclasses import dataclass

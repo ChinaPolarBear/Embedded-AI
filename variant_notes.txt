@@ -6,7 +6,11 @@ latent: 32
 epochs: 100
 dataset_samples: 1024
 lr: 2e-4
-bitwidths: input 4 / weight 4 / act 4 / output unquantized
+bitwidths:
+- input activations: 4-bit
+- layer weights: 4-bit
+- hidden activations: 4-bit
+- final output: unquantized
 input quant scale from step5:
 - 0.165131882
 

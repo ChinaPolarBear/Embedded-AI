@@ -66,6 +66,9 @@ The current repository includes:
 - `step6_compare_deploy_output.py`
   Compares decoded runtime / board output against the saved SSFM reference, reports error metrics, and saves comparison figures.
 
+- `dequantize_board_output.py`
+  Decodes raw integer board output such as `output.bin` or `output_raw_int16_*.npy`, infers the output scale from the raw QONNX graph, and writes `output_dequant.npy`.
+
 - `finn_qonnx_utils.py`
   Shared helpers used by local export / debugging utilities. Step 4 itself is now self-contained and does not need this file on the lab computer.
 
@@ -161,10 +164,10 @@ python test_trained_model_csv.py --csv Data_Output/waveform_data_trainmatch.csv 
 python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out trunk_matrices.npz
 ```
 
-Current mainline compact-complex recommendation after `my_build_2` routing success:
+Next recommended mainline experiment for a `(1,256)` compact-complex interface:
 
 ```powershell
-python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out trunk_matrices.npz --n_t_out 32 --p_dim_out 16 --time_slice uniform
+python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out trunk_matrices.npz --n_t_out 128 --p_dim_out 16 --time_slice uniform
 ```
 
 ### 4. Float deploy sanity check
@@ -175,18 +178,18 @@ python step2_deploy_float_sanity.py --ckpt hybrid_pinn_deeponet.pth --mat trunk_
 
 ### 5. Export raw QONNX
 
-Recommended mainline local export for the current `(1,64)` probe:
+Recommended mainline local export for the next `(1,256)` experiment:
 
 ```powershell
-python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 100 --dataset_samples 1024 --lr 2e-4 --hidden 64 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
+python step3_brevitas_qat_export_qonnx.py --mat trunk_matrices.npz --epochs 150 --dataset_samples 2048 --lr 2e-4 --hidden 64 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 4 --qonnx_out deeponet_u250_int4_qonnx.onnx
 ```
 
 Why this combination:
 
-- `n_t_out = 32` gives a clearer `(1,64)` board-side waveform view
-- `p_dim_out = 16` keeps `latent = 32`, which matches the routing-safe light variant that already built successfully
-- `hidden = 64` increases branch capacity from the light variant without jumping back to the route-failing heavy model
-- `epochs = 100` and `dataset_samples = 1024` improve model fit without changing hardware structure
+- `n_t_out = 128` gives the desired `(1,256)` board-side waveform view
+- `p_dim_out = 16` keeps `latent = 32`, which is still the safest known latent size from the successful build path
+- `hidden = 64` keeps the successful mainline branch width instead of adding another routing risk
+- `epochs = 150` and `dataset_samples = 2048` raise the training budget substantially without changing the deploy structure beyond the larger probe shape
 - final output is left unquantized on purpose, so Step 6 can compare a cleaner float-domain output after dequantization
 
 For FINN bring-up, prefer a much smaller model first:
@@ -527,6 +530,13 @@ If you generated multiple verification cases with `step5_generate_verification.p
 python step6_compare_deploy_output.py --cases_dir verification --actual_name output.npy
 ```
 
+If the returned board output is still a raw integer dump such as `output.bin` or `output_raw_int16_*.npy`, dequantize it first:
+
+```powershell
+python dequantize_board_output.py --model deeponet_u250_int4_qonnx.onnx --cases_dir verification --input_name output.bin
+python step6_compare_deploy_output.py --cases_dir verification --actual_name output_dequant.npy
+```
+
 That batch mode writes:
 
 - one figure subdirectory per case
@@ -548,7 +558,7 @@ Important:
 
 - `board_output.npy` must already be decoded/dequantized into `[B,64]` float for the current compact-complex probe, or into one of the older complex forms `[B,2,N_t]`, `[B,N_t,2]`, flattened `[B,2*N_t]`, `[2,N_t]`, `[N_t,2]`, flattened `[2*N_t]`, or complex waveform form
 - for the current board-probe deploy output, use `[1,64]`: `output[0,0:32]` is real(A(L,t_probe)) and `output[0,32:64]` is imag(A(L,t_probe))
-- raw board-specific integer dumps such as `(1, 64) int16` or `(1, 64) int32` are not self-describing enough for this script and must be decoded/dequantized first by the board host code
+- raw board-specific integer dumps such as `(1, 64) int16` or `(1, 64) int32` are not self-describing enough for this script and must be decoded/dequantized first, for example with `dequantize_board_output.py`
 
 This is the point where you can honestly say the deployed FPGA path has been functionally checked against the SSFM reference, rather than only synthesized and packaged.
 
