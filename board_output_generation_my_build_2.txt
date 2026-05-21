@@ -270,7 +270,7 @@ PY
 
 Step 6: dequantize on the host machine
 
-After copying `output.bin` or `output_raw_int16_1x64.npy` back into this
+After copying `output.bin` or `output_raw_int16_1x256.npy` back into this
 repository, run:
 
 ```powershell
