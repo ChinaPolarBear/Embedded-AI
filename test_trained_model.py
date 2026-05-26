@@ -1,4 +1,7 @@
 # test_trained_model.py (Demo-style evaluator with EVM overlay)
+import json
+import time
+
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
@@ -22,6 +25,8 @@ from pinn_physics_model import (
 # --- evaluation settings ---
 snr_db_eval = 25.0   # ALWAYS add AWGN for observation realism
 num_eval_samples = 50
+timing_warmup_runs = 5
+timing_measure_runs = 30
 
 
 def print_config():
@@ -42,6 +47,11 @@ def load_trained_model(model_path: str):
     model.eval()
     print(f"[OK] Loaded model: {model_path}")
     return model
+
+
+def synchronize_device():
+    if torch.cuda.is_available() and getattr(device, "type", "") == "cuda":
+        torch.cuda.synchronize(device)
 
 
 def evm_rms_pct(pred: np.ndarray, ref: np.ndarray, eps: float = 1e-12) -> float:
@@ -67,6 +77,36 @@ def predict_AL(model, A0: torch.Tensor) -> np.ndarray:
     z_plot = torch.full_like(t_plot, L)                       # [N_t, 1]
     u_pred, v_pred = model(u_in, t_plot, z_plot)
     return (u_pred + 1j * v_pred).detach().cpu().numpy().reshape(-1).astype(np.complex128)
+
+
+@torch.no_grad()
+def benchmark_predict_AL(model, A0: torch.Tensor, warmup_runs: int, measure_runs: int):
+    """Benchmark one full-waveform prediction A(0,t) -> A(L,t)."""
+    warmup_runs = max(int(warmup_runs), 0)
+    measure_runs = max(int(measure_runs), 1)
+
+    for _ in range(warmup_runs):
+        _ = predict_AL(model, A0)
+
+    synchronize_device()
+    timings_ms = []
+    for _ in range(measure_runs):
+        synchronize_device()
+        t0 = time.perf_counter()
+        _ = predict_AL(model, A0)
+        synchronize_device()
+        t1 = time.perf_counter()
+        timings_ms.append((t1 - t0) * 1e3)
+
+    timings_arr = np.asarray(timings_ms, dtype=np.float64)
+    return {
+        "warmup_runs": warmup_runs,
+        "measure_runs": measure_runs,
+        "mean_ms": float(timings_arr.mean()),
+        "std_ms": float(timings_arr.std()),
+        "min_ms": float(timings_arr.min()),
+        "max_ms": float(timings_arr.max()),
+    }
 
 
 def overlay_text(ax, text: str):
@@ -147,6 +187,27 @@ def main():
     output_dir = make_figure_output_dir(__file__)
     print(f"Saving evaluation figures to {output_dir}")
     model = load_trained_model(MODEL_PATH)
+
+    timing_A0, _, _ = generate_qam_waveform()
+    timing_stats = benchmark_predict_AL(
+        model,
+        timing_A0,
+        warmup_runs=timing_warmup_runs,
+        measure_runs=timing_measure_runs,
+    )
+    timing_path = output_dir / "pytorch_inference_timing.json"
+    timing_path.write_text(json.dumps(timing_stats, indent=2), encoding="utf-8")
+
+    print("========== PyTorch Inference Timing ==========")
+    print("Task         : one full waveform prediction A(0,t) -> A(L,t)")
+    print(f"Warmup runs  : {timing_stats['warmup_runs']}")
+    print(f"Measure runs : {timing_stats['measure_runs']}")
+    print(f"Mean latency : {timing_stats['mean_ms']:.3f} ms")
+    print(f"Std latency  : {timing_stats['std_ms']:.3f} ms")
+    print(f"Min latency  : {timing_stats['min_ms']:.3f} ms")
+    print(f"Max latency  : {timing_stats['max_ms']:.3f} ms")
+    print(f"Saved timing : {timing_path}")
+    print("=============================================\n")
 
     t_np = t_grid.cpu().numpy()
 

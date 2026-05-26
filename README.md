@@ -37,7 +37,7 @@ The current repository includes:
   Generates waveform CSV files with the same waveform generator and SSFM logic used by training.
 
 - `test_trained_model.py`
-  Evaluates the trained model on randomly generated waveforms and plots results.
+  Evaluates the trained model on randomly generated waveforms, plots results, and prints/saves PyTorch inference timing.
 
 - `test_trained_model_csv.py`
   Evaluates the trained model from CSV waveform data.
@@ -68,6 +68,9 @@ The current repository includes:
 
 - `dequantize_board_output.py`
   Decodes raw integer board output such as `output.bin` or `output_raw_int16_*.npy`, infers the output scale from the raw QONNX graph, and writes `output_dequant.npy`.
+
+- `run_finn_xrt_timed_1x256.cpp`
+  Timing-enabled XRT host program template for `(1,256)` FINN deployments. It prints board-side end-to-end latency and writes `board_inference_timing.txt`.
 
 - `finn_qonnx_utils.py`
   Shared helpers used by local export / debugging utilities. Step 4 itself is now self-contained and does not need this file on the lab computer.
@@ -157,6 +160,10 @@ The training script now caches the generated train/test datasets under `dataset_
 python test_trained_model.py
 python test_trained_model_csv.py --csv Data_Output/waveform_data_trainmatch.csv --phase-align
 ```
+
+`test_trained_model.py` now also prints PyTorch inference latency for one full
+waveform prediction `A(0,t) -> A(L,t)` and saves the numbers into
+`pytorch_inference_timing.json` inside its figure output directory.
 
 ### 3. Freeze the trunk
 

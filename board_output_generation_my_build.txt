@@ -84,142 +84,20 @@ print("input.bin size check passed")
 PY
 ```
 
-Step 2: save the following XRT program as `run_finn_xrt.cpp`
+Step 2: copy the timing-enabled XRT program into the driver directory
 
 ```bash
 cd /home/xband/finn/my_build/output_u250_bitfile/deploy/driver
-nano run_finn_xrt.cpp
+cp /home/xband/finn/run_finn_xrt_timed_1x256.cpp run_finn_xrt.cpp
 ```
 
-Paste this code:
+This template prints board-side inference timing and also writes:
 
-```cpp
-#include <fstream>
-#include <iostream>
-#include <vector>
-#include <cstring>
-#include <stdexcept>
-#include <cstdint>
+- `output.bin`
+- `board_inference_timing.txt`
 
-#include <xrt/xrt_bo.h>
-#include <xrt/xrt_device.h>
-#include <xrt/xrt_kernel.h>
-
-static std::vector<char> read_binary_file(const std::string& filename) {
-    std::ifstream ifs(filename, std::ios::binary | std::ios::ate);
-    if (!ifs) {
-        throw std::runtime_error("Cannot open file: " + filename);
-    }
-
-    std::streamsize size = ifs.tellg();
-    if (size < 0) {
-        throw std::runtime_error("Failed to get file size: " + filename);
-    }
-
-    ifs.seekg(0, std::ios::beg);
-    std::vector<char> buffer(static_cast<size_t>(size));
-    if (!ifs.read(buffer.data(), size)) {
-        throw std::runtime_error("Failed to read file: " + filename);
-    }
-    return buffer;
-}
-
-int main() {
-    try {
-        const std::string xclbin_path = "../bitfile/finn-accel.xclbin";
-        const std::string input_path = "input.bin";
-        const std::string output_path = "output.bin";
-
-        const size_t input_bytes = 1 * 256 * 1;
-        const size_t output_elems = 1 * 256;
-        const size_t bytes_per_output_elem = 2;
-        const size_t output_bytes = output_elems * bytes_per_output_elem;
-        const uint32_t numReps = 1;
-
-        std::cout << "Opening device 0..." << std::endl;
-        auto device = xrt::device(0);
-
-        std::cout << "Loading xclbin: " << xclbin_path << std::endl;
-        auto uuid = device.load_xclbin(xclbin_path);
-
-        std::cout << "Opening kernels..." << std::endl;
-        auto idma = xrt::kernel(device, uuid, "StreamingDataflowPartition_0");
-        auto odma = xrt::kernel(device, uuid, "StreamingDataflowPartition_2");
-
-        std::cout << "Allocating buffers..." << std::endl;
-        auto in_bo = xrt::bo(device, input_bytes, idma.group_id(0));
-        auto out_bo = xrt::bo(device, output_bytes, odma.group_id(0));
-
-        auto in_map = in_bo.map<uint8_t*>();
-        auto out_map = out_bo.map<uint8_t*>();
-
-        std::cout << "Reading input.bin..." << std::endl;
-        auto input_data = read_binary_file(input_path);
-        if (input_data.size() != input_bytes) {
-            std::cerr << "Input size mismatch. Expected "
-                      << input_bytes
-                      << " bytes, got "
-                      << input_data.size()
-                      << " bytes."
-                      << std::endl;
-            return 1;
-        }
-
-        std::memcpy(in_map, input_data.data(), input_bytes);
-        std::memset(out_map, 0, output_bytes);
-
-        std::cout << "Sync input buffer to device..." << std::endl;
-        in_bo.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-        out_bo.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-
-        std::cout << "Starting output DMA first..." << std::endl;
-        auto odma_run = odma(out_bo, numReps);
-
-        std::cout << "Starting input DMA..." << std::endl;
-        auto idma_run = idma(in_bo, numReps);
-
-        std::cout << "Waiting for IDMA..." << std::endl;
-        idma_run.wait();
-
-        std::cout << "Waiting for ODMA..." << std::endl;
-        odma_run.wait();
-
-        std::cout << "Sync output buffer from device..." << std::endl;
-        out_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
-
-        std::cout << "Writing output.bin..." << std::endl;
-        std::ofstream ofs(output_path, std::ios::binary);
-        if (!ofs) {
-            throw std::runtime_error("Cannot open output file: " + output_path);
-        }
-
-        ofs.write(
-            reinterpret_cast<char*>(out_map),
-            static_cast<std::streamsize>(output_bytes)
-        );
-        ofs.close();
-
-        std::cout << "Done. Output saved to " << output_path << std::endl;
-        std::cout << "Expected input bytes: " << input_bytes << std::endl;
-        std::cout << "Expected output tensor shape: (1, 256)" << std::endl;
-        std::cout << "Expected output layout: first 128 real, last 128 imag" << std::endl;
-        std::cout << "Expected output datatype: INT16" << std::endl;
-        std::cout << "Expected output bytes: " << output_bytes << std::endl;
-        return 0;
-    } catch (const std::exception& e) {
-        std::cerr << "ERROR: " << e.what() << std::endl;
-        return 1;
-    }
-}
-```
-
-Save and exit:
-
-```text
-Ctrl+O
-Enter
-Ctrl+X
-```
+If your lab copy of the repository is not under `/home/xband/finn`, adjust the
+source path accordingly.
 
 Step 3: compile the XRT program
 
@@ -234,8 +112,16 @@ Step 4: run the board-side program to generate `output.bin`
 ```bash
 cd /home/xband/finn/my_build/output_u250_bitfile/deploy/driver
 source /opt/xilinx/xrt/setup.sh
-./run_finn_xrt
+./run_finn_xrt 20 2
 ```
+
+The two numbers mean:
+
+- `20` timed runs
+- `2` warmup runs
+
+The program prints mean / std / min / max latency in milliseconds and also
+saves the same summary into `board_inference_timing.txt`.
 
 Step 5: quick check of `output.bin` and decode it as `(1, 256)`
 
@@ -293,6 +179,7 @@ Step 7: send the result back to the host machine
 Prefer sending:
 
 - `output.bin`
+- `board_inference_timing.txt`
 
 If convenient, also send:
 
