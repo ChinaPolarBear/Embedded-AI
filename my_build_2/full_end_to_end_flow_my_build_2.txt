@@ -1,0 +1,152 @@
+0. Switch the shell if needed
+
+Reboot the machine before switching shells if your system requires it.
+
+If you need the shell used for board-side `output.bin` generation:
+
+```bash
+sudo /opt/xilinx/xrt/bin/xbmgmt program --device 65:00.0 --shell /lib/firmware/xilinx/12c8fafb0632499db1c0c6676271b8a6/partition.xsabin
+sudo /opt/xilinx/xrt/bin/xbutil examine
+```
+
+If you need to switch back to the shell used for `build_dataflow`:
+
+```bash
+sudo /opt/xilinx/xrt/bin/xbmgmt program --device 65:00.0 --shell /lib/firmware/xilinx/f8dac62e49d9b0aae9fc6f260d9d0dfb/partition.xsabin
+sudo /opt/xilinx/xrt/bin/xbutil examine
+```
+
+1. Run `quicktest` once, then enter Docker
+
+You can try Step 2 first. If Docker does not come up cleanly, come back and run this:
+
+```bash
+cd ~
+mkdir -p ~/finn_tmp
+
+cd ~
+git clone https://github.com/Xilinx/finn.git
+
+cd ~/finn
+
+export FINN_BUILD_DIR=~/finn_tmp
+export FINN_HOST_BUILD_DIR=~/finn_tmp
+
+docker version
+docker ps
+
+./run-docker.sh quicktest
+```
+
+2. Enter Docker
+
+Once the environment is ready, enter the FINN Docker shell:
+
+```bash
+cd ~/finn
+export FINN_BUILD_DIR=~/finn_tmp
+./run-docker.sh
+```
+
+3. Unzip the package into `my_build_2` and run Step 4
+
+Copy the ZIP package into `my_build_2` and extract it. After extraction you should see:
+
+- `deeponet_u250_int4_qonnx.onnx`
+- `step4_convert_qonnx_to_finn.py`
+
+Run:
+
+```bash
+cd my_build_2
+python step4_convert_qonnx_to_finn.py --qonnx_in deeponet_u250_int4_qonnx.onnx
+```
+
+This will generate `deeponet_u250_int4_qonnx_finn.onnx`.
+
+Rename that file to `model.onnx`, and delete the old `model.onnx` first if one is already there.
+
+4. Check the build environment
+
+```bash
+cd /home/xband/finn/my_build_2
+
+export FINN_XILINX_PATH=/opt/Xilinx
+export FINN_XILINX_VERSION=2022.2
+export VIVADO_PATH=/opt/Xilinx/Vivado/2022.2
+export VITIS_PATH=/opt/Xilinx/Vitis/2022.2
+export HLS_PATH=/opt/Xilinx/Vitis_HLS/2022.2
+export PLATFORM_REPO_PATHS=/opt/xilinx/platforms
+# export NUM_DEFAULT_WORKERS=1   # only add this if the machine tends to shut down
+
+source /opt/Xilinx/Vivado/2022.2/settings64.sh
+source /opt/Xilinx/Vitis/2022.2/settings64.sh
+source /opt/Xilinx/Vitis_HLS/2022.2/settings64.sh
+```
+
+5. Run `my_build_2`
+
+This step usually takes around two and a half hours.
+
+```bash
+cd ~/finn
+
+mkdir -p ~/finn_tmp
+
+unset FINN_BUILD_DIR
+unset FINN_HOST_BUILD_DIR
+
+export FINN_BUILD_DIR=/home/xband/finn_tmp
+export FINN_HOST_BUILD_DIR=/home/xband/finn_tmp
+
+echo $FINN_BUILD_DIR
+echo $FINN_HOST_BUILD_DIR
+./run-docker.sh build_dataflow /home/xband/finn/my_build_2
+```
+
+If a temporary-directory problem appears, usually around Step 13, run this cleanup and retry:
+
+```bash
+cd ~/finn
+
+rm -rf /home/xband/finn_tmp/vivado_stitch_proj_*
+rm -rf /home/xband/finn_tmp/vitis_link_proj_*
+rm -rf /home/xband/finn_tmp/code_gen_ipgen_*
+rm -rf /home/xband/finn_tmp/report/*
+rm -rf /home/xband/finn/my_build_2/output_u250_bitfile_2
+
+mkdir -p /home/xband/finn_tmp
+
+unset FINN_BUILD_DIR
+unset FINN_HOST_BUILD_DIR
+
+export FINN_BUILD_DIR=/home/xband/finn_tmp
+export FINN_HOST_BUILD_DIR=/home/xband/finn_tmp
+export FINN_XILINX_PATH=/opt/Xilinx
+export FINN_XILINX_VERSION=2022.2
+export VIVADO_PATH=/opt/Xilinx/Vivado/2022.2
+export VITIS_PATH=/opt/Xilinx/Vitis/2022.2
+export HLS_PATH=/opt/Xilinx/Vitis_HLS/2022.2
+export PLATFORM_REPO_PATHS=/opt/xilinx/platforms
+
+echo "FINN_BUILD_DIR=$FINN_BUILD_DIR"
+echo "FINN_HOST_BUILD_DIR=$FINN_HOST_BUILD_DIR"
+
+./run-docker.sh build_dataflow /home/xband/finn/my_build_2
+```
+
+6. Check `driver.py` before running the accelerator
+
+Before runtime testing, inspect:
+
+```text
+/home/xband/finn/my_build_2/output_u250_bitfile_2/deploy/driver/driver.py
+```
+
+Make sure the shapes match what you expect.
+
+For the runtime test itself, see:
+
+```text
+board_output_generation_my_build_2.txt
+```

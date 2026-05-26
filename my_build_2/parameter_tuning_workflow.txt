@@ -1,0 +1,323 @@
+Parameter-tuning workflow for `my_build_2`
+
+This document is for teammates who will continue the performance and accuracy
+experiments using `my_build_2` only.
+
+Scope:
+
+- do not retrain a new `.pth` checkpoint
+- do not modify the mainline `my_build`
+- only change the deploy-side parameters and artifacts for `my_build_2`
+- always reuse the existing `hybrid_pinn_deeponet.pth`
+
+
+0. Files you need
+
+At minimum, keep these files together:
+
+- `my_build_2/`
+- `hybrid_pinn_deeponet.pth`
+- `pinn_physics_model.py`
+- `finn_qonnx_utils.py`
+- `plot_output_utils.py`
+- `step1_export_trunk_matrices.py`
+- `step3_brevitas_qat_export_qonnx.py`
+- `step4_convert_qonnx_to_finn.py`
+- `dequantize_board_output.py`
+- `board_output_generation_my_build_2.txt`
+- `run_finn_xrt_timed_1x256.cpp`
+
+
+1. Understand which parameters control what
+
+The most important parameters are:
+
+- `n_t_out` in Step 1
+  Controls the compact-complex input/output shape:
+  `shape = (1, 2 * n_t_out)`
+
+- `p_dim_out` in Step 1
+  Controls the deploy latent width:
+  `latent = 2 * p_dim_out`
+
+- `hidden` in Step 3
+  Controls the branch MLP width
+
+- `epochs` in Step 3
+  Controls how long the deploy/QAT model is trained
+
+- `dataset_samples` in Step 3
+  Controls how many supervised samples Step 3 uses
+
+- `lr` in Step 3
+  Learning rate for Step 3
+
+- `input_bit_width`
+- `weight_bit_width`
+- `act_bit_width`
+  Control quantization precision
+
+Recommended interpretation:
+
+- larger `n_t_out` usually improves waveform detail, but increases deploy cost
+- larger `p_dim_out` usually improves expressiveness, but can quickly hurt routability
+- larger `hidden` increases branch capacity and deploy cost
+- larger `act_bit_width` can improve accuracy if hidden activations are currently too coarse
+
+
+2. Check the current `my_build_2` baseline
+
+Before changing anything, open:
+
+- `my_build_2/variant_notes.txt`
+
+At the time of writing, the actual current `my_build_2` files correspond to:
+
+- `shape = (1,256)`
+- `hidden = 64`
+- `p_dim_out = 28`
+- `latent = 56`
+- `epochs = 150`
+- `dataset_samples = 2048`
+- `input = 4-bit`, `weight = 4-bit`, `hidden activations = 8-bit`
+
+
+3. Decide what to change
+
+Change one major factor at a time whenever possible.
+
+Examples:
+
+- accuracy-focused experiment:
+  keep `shape`, `hidden`, and `latent` fixed, and only raise
+  `act_bit_width` from `4` to `8`
+
+- shape experiment:
+  change `n_t_out`, keep `hidden`, `p_dim_out`, and bit widths fixed
+
+- latent experiment:
+  change `p_dim_out`, keep the rest fixed
+
+Avoid mixing too many changes in one run, otherwise it becomes hard to explain
+why a build succeeded, failed, or improved.
+
+
+4. Regenerate trunk matrices (Step 1)
+
+Run Step 1 from the repository root and write directly into `my_build_2`:
+
+```powershell
+python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out my_build_2\trunk_matrices.npz --n_t_out 128 --p_dim_out 28 --time_slice uniform
+```
+
+Things you may change here:
+
+- `128` if you want a different `n_t_out`
+- `28` if you want a different `p_dim_out`
+
+Reminders:
+
+- `n_t_out = 128` gives `shape = (1,256)`
+- `p_dim_out = 28` gives `latent = 56`
+
+
+5. Regenerate raw QONNX (Step 3)
+
+Run Step 3 from the repository root and write directly into `my_build_2`:
+
+```powershell
+python step3_brevitas_qat_export_qonnx.py --mat my_build_2\trunk_matrices.npz --epochs 150 --dataset_samples 2048 --lr 2e-4 --hidden 64 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 8 --qonnx_out my_build_2\deeponet_u250_int4_qonnx.onnx
+```
+
+Typical things to edit here:
+
+- `--epochs`
+- `--dataset_samples`
+- `--hidden`
+- `--input_bit_width`
+- `--weight_bit_width`
+- `--act_bit_width`
+
+Example A: keep structure fixed and only test 8-bit hidden activations
+
+```powershell
+python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out my_build_2\trunk_matrices.npz --n_t_out 128 --p_dim_out 28 --time_slice uniform
+python step3_brevitas_qat_export_qonnx.py --mat my_build_2\trunk_matrices.npz --epochs 150 --dataset_samples 2048 --lr 2e-4 --hidden 64 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 8 --qonnx_out my_build_2\deeponet_u250_int4_qonnx.onnx
+```
+
+Example B: test an even larger latent than the current baseline
+
+```powershell
+python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out my_build_2\trunk_matrices.npz --n_t_out 128 --p_dim_out 32 --time_slice uniform
+python step3_brevitas_qat_export_qonnx.py --mat my_build_2\trunk_matrices.npz --epochs 150 --dataset_samples 2048 --lr 2e-4 --hidden 64 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 8 --qonnx_out my_build_2\deeponet_u250_int4_qonnx.onnx
+```
+
+
+6. Record the new experiment
+
+After Step 1 / Step 3 finish, update:
+
+- `my_build_2/variant_notes.txt`
+
+Write down:
+
+- shape
+- hidden
+- `p_dim_out`
+- latent
+- epochs
+- dataset samples
+- learning rate
+- bit widths
+
+This makes later comparisons much easier.
+
+
+7. Convert raw QONNX to FINN-ONNX (Step 4)
+
+Copy or sync the updated `my_build_2` folder to the lab machine, then run:
+
+```bash
+cd /home/xband/finn/my_build_2
+python step4_convert_qonnx_to_finn.py --qonnx_in deeponet_u250_int4_qonnx.onnx
+```
+
+This will generate:
+
+- `deeponet_u250_int4_qonnx_finn.onnx`
+
+Rename it to:
+
+- `model.onnx`
+
+
+8. Build the accelerator
+
+Run:
+
+```bash
+cd ~/finn
+mkdir -p ~/finn_tmp
+unset FINN_BUILD_DIR
+unset FINN_HOST_BUILD_DIR
+export FINN_BUILD_DIR=/home/xband/finn_tmp
+export FINN_HOST_BUILD_DIR=/home/xband/finn_tmp
+./run-docker.sh build_dataflow /home/xband/finn/my_build_2
+```
+
+If the build fails because of stale temporary directories, run the cleanup block
+from:
+
+- `full_end_to_end_flow_my_build_2.txt`
+
+Then rerun the build.
+
+
+9. Generate verification input cases
+
+After updating the model, regenerate verification inputs because the current
+`input.bin` and reference outputs may no longer match the new QONNX.
+
+Run from the repository root:
+
+```powershell
+python my_build_2\step5_generate_verification.py --out_dir my_build_2\verification --source random --seed 123 --num_cases 5 --mat my_build_2\trunk_matrices.npz --model my_build_2\deeponet_u250_int4_qonnx.onnx
+```
+
+This refreshes:
+
+- `my_build_2/verification/case_000/`
+- ...
+- `my_build_2/verification/case_004/`
+
+
+10. Run the board-side accelerator
+
+Use:
+
+- `board_output_generation_my_build_2.txt`
+
+That document explains how to:
+
+- verify `input.bin`
+- compile `run_finn_xrt.cpp`
+- generate `output.bin`
+- print and save board-side latency in `board_inference_timing.txt`
+- decode raw output into `output_raw_int16_...npy`
+
+
+11. Dequantize the returned board output
+
+After copying raw outputs back to the host, run:
+
+```powershell
+python dequantize_board_output.py --model my_build_2\deeponet_u250_int4_qonnx.onnx --cases_dir my_build_2\verification --input_name output_raw_int16_1x256.npy
+```
+
+This writes:
+
+- `output_dequant.npy`
+
+inside each verification case folder.
+
+
+12. Compare against the SSFM reference
+
+Run:
+
+```powershell
+python my_build_2\step6_compare_deploy_output.py --cases_dir my_build_2\verification --actual_name output_dequant.npy
+```
+
+If you also want PyTorch-vs-SSFM figures and PyTorch prediction timing on the
+same cases, run:
+
+```powershell
+python my_build_2\step6_compare_deploy_output.py --cases_dir my_build_2\verification --actual_name output_dequant.npy --include_pytorch
+```
+
+Inspect:
+
+- amplitude plots
+- constellation plots
+- error summaries
+- batch summary JSON / CSV
+- `pytorch_metrics.json`
+- `pytorch_inference_timing.json`
+
+
+13. Recommended experiment discipline
+
+For every new `my_build_2` trial:
+
+1. change only one major variable group
+2. rerun Step 1 if `n_t_out` or `p_dim_out` changed
+3. rerun Step 3
+4. update `variant_notes.txt`
+5. regenerate verification cases
+6. rerun Step 4 and `build_dataflow`
+7. run board verification
+8. compare the new metrics against the previous run
+
+
+14. What not to do
+
+- do not retrain `hybrid_pinn_deeponet.pth`
+- do not modify `my_build`
+- do not compare new board output against old verification cases
+- do not change many structural variables at once unless the goal is only a rough exploratory run
+
+
+15. Short summary
+
+The normal loop is:
+
+1. change parameters in Step 1 / Step 3 commands
+2. regenerate `my_build_2/trunk_matrices.npz`
+3. regenerate `my_build_2/deeponet_u250_int4_qonnx.onnx`
+4. update `my_build_2/variant_notes.txt`
+5. regenerate `my_build_2/verification`
+6. rerun Step 4 and FINN build
+7. run board output generation
+8. dequantize
+9. compare plots and metrics

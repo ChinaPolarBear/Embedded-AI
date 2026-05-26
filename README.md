@@ -165,6 +165,14 @@ python test_trained_model_csv.py --csv Data_Output/waveform_data_trainmatch.csv 
 waveform prediction `A(0,t) -> A(L,t)` and saves the numbers into
 `pytorch_inference_timing.json` inside its figure output directory.
 
+If you also want Step 6 to run the original PyTorch model on the same
+verification case(s), save PyTorch-only comparison figures, and benchmark the
+PyTorch prediction time on the exact same probe points, add:
+
+```powershell
+--include_pytorch
+```
+
 ### 3. Freeze the trunk
 
 ```powershell
@@ -542,6 +550,13 @@ If the returned board output is still a raw integer dump such as `output.bin` or
 ```powershell
 python dequantize_board_output.py --model deeponet_u250_int4_qonnx.onnx --cases_dir verification --input_name output.bin
 python step6_compare_deploy_output.py --cases_dir verification --actual_name output_dequant.npy
+```
+
+To generate the board-vs-SSFM figures and, on the same cases, additional
+PyTorch-vs-SSFM figures plus `pytorch_inference_timing.json`, run:
+
+```powershell
+python step6_compare_deploy_output.py --cases_dir verification --actual_name output_dequant.npy --include_pytorch
 ```
 
 That batch mode writes:

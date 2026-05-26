@@ -1,0 +1,17 @@
+{
+  "output_dir": "output_u250_bitfile_2",
+  "synth_clk_period_ns": 12.5,
+  "fpga_part": "xcu250-figd2104-2L-e",
+  "shell_flow_type": "vitis_alveo",
+  "vitis_platform": "xilinx_u250_gen3x16_xdma_4_1_202210_1",
+  "generate_outputs": [
+    "estimate_reports",
+    "stitched_ip",
+    "rtlsim_performance",
+    "out_of_context_synth",
+    "bitfile",
+    "pynq_driver",
+    "deployment_package"
+  ],
+  "save_intermediate_models": true
+}
