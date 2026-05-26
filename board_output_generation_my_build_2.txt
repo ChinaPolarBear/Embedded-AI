@@ -86,7 +86,7 @@ Step 2: copy the timing-enabled XRT program into the driver directory
 
 ```bash
 cd /home/xband/finn/my_build_2/output_u250_bitfile_2/deploy/driver
-cp /home/xband/finn/run_finn_xrt_timed_1x256.cpp run_finn_xrt.cpp
+cp /home/xband/finn/my_build_2/output_u250_bitfile_2/deploy/driver/run_finn_xrt_timed_1x256.cpp run_finn_xrt.cpp
 ```
 
 This template prints board-side inference timing and also writes:
@@ -94,8 +94,6 @@ This template prints board-side inference timing and also writes:
 - `output.bin`
 - `board_inference_timing.txt`
 
-If your lab copy of the repository is not under `/home/xband/finn`, adjust the
-source path accordingly.
 
 Step 3: compile the XRT program
 
