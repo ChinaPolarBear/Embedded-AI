@@ -9,10 +9,20 @@ Current variant target:
 
 - `shape = (1,256)`
 - `hidden = 64`
-- `latent = 56` via `p_dim_out = 28`
+- `latent = 64` via `p_dim_out = 32`
 - `epochs = 150`
 - `dataset_samples = 2048`
 - `input / weight = 4-bit`, `hidden activations = 8-bit`
+
+Current status:
+
+- `deeponet_u250_int4_qonnx.onnx` and `trunk_matrices.npz` already match the
+  latent-64 variant
+- `model.onnx`, the completed dataflow build, and the latest verification bundle
+  now correspond to the latent-64 variant
+- latest dequantized board + PyTorch comparison figures are under:
+  `my_build_2/figures/dequantized/20260526_160038`
+- see `variant_notes.txt` for the current batch metrics and timing summary
 
 This folder now includes:
 

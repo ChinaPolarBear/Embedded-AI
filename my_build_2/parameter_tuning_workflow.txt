@@ -75,11 +75,19 @@ At the time of writing, the actual current `my_build_2` files correspond to:
 
 - `shape = (1,256)`
 - `hidden = 64`
-- `p_dim_out = 28`
-- `latent = 56`
+- `p_dim_out = 32`
+- `latent = 64`
 - `epochs = 150`
 - `dataset_samples = 2048`
 - `input = 4-bit`, `weight = 4-bit`, `hidden activations = 8-bit`
+
+Note:
+
+- `deeponet_u250_int4_qonnx.onnx` and `trunk_matrices.npz` are the first files
+  to change when you switch variants
+- `model.onnx`, returned board outputs, and plotted figures may still belong to
+  the previous variant until you rerun Step 4, build, Step 5, board execution,
+  dequantization, and Step 6
 
 
 3. Decide what to change
@@ -107,18 +115,18 @@ why a build succeeded, failed, or improved.
 Run Step 1 from the repository root and write directly into `my_build_2`:
 
 ```powershell
-python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out my_build_2\trunk_matrices.npz --n_t_out 128 --p_dim_out 28 --time_slice uniform
+python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out my_build_2\trunk_matrices.npz --n_t_out 128 --p_dim_out 32 --time_slice uniform
 ```
 
 Things you may change here:
 
 - `128` if you want a different `n_t_out`
-- `28` if you want a different `p_dim_out`
+- `32` if you want a different `p_dim_out`
 
 Reminders:
 
 - `n_t_out = 128` gives `shape = (1,256)`
-- `p_dim_out = 28` gives `latent = 56`
+- `p_dim_out = 32` gives `latent = 64`
 
 
 5. Regenerate raw QONNX (Step 3)
@@ -141,14 +149,14 @@ Typical things to edit here:
 Example A: keep structure fixed and only test 8-bit hidden activations
 
 ```powershell
-python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out my_build_2\trunk_matrices.npz --n_t_out 128 --p_dim_out 28 --time_slice uniform
+python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out my_build_2\trunk_matrices.npz --n_t_out 128 --p_dim_out 32 --time_slice uniform
 python step3_brevitas_qat_export_qonnx.py --mat my_build_2\trunk_matrices.npz --epochs 150 --dataset_samples 2048 --lr 2e-4 --hidden 64 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 8 --qonnx_out my_build_2\deeponet_u250_int4_qonnx.onnx
 ```
 
-Example B: test an even larger latent than the current baseline
+Example B: test a smaller fallback if the current latent-64 target does not route
 
 ```powershell
-python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out my_build_2\trunk_matrices.npz --n_t_out 128 --p_dim_out 32 --time_slice uniform
+python step1_export_trunk_matrices.py --ckpt hybrid_pinn_deeponet.pth --out my_build_2\trunk_matrices.npz --n_t_out 128 --p_dim_out 28 --time_slice uniform
 python step3_brevitas_qat_export_qonnx.py --mat my_build_2\trunk_matrices.npz --epochs 150 --dataset_samples 2048 --lr 2e-4 --hidden 64 --input_bit_width 4 --weight_bit_width 4 --act_bit_width 8 --qonnx_out my_build_2\deeponet_u250_int4_qonnx.onnx
 ```
 

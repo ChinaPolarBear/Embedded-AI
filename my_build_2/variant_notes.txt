@@ -1,8 +1,8 @@
-current variant for my_build_2
+current completed variant for my_build_2
 shape: (1,256) -> (1,256)
 hidden: 64
-p_dim_out: 28
-latent: 56
+p_dim_out: 32
+latent: 64
 epochs: 150
 dataset_samples: 2048
 lr: 2e-4
@@ -12,41 +12,52 @@ bitwidths:
 - hidden activations: 8-bit
 - final output: unquantized
 
-input quant scale from step5:
-- 0.1860494315624237
+quantization scales:
+- input quant scale from the current raw qonnx: 0.18513250350952148
+- output dequant scale from the current raw qonnx: 0.0008227360876779458
 
-expected output dequant scale from the current raw qonnx:
-- 0.000758396307503878
-
-files:
-- deeponet_u250_int4_qonnx.onnx
-- model.onnx
-- step4_convert_qonnx_to_finn.py
-- step5_generate_verification.py
-- step6_compare_deploy_output.py
-- plot_output_utils.py
-- pinn_physics_model.py
-- trunk_matrices.npz
-- dataflow_build_config.json
-- parameter_tuning_workflow.txt
+raw-qonnx / model checks:
+- trunk_matrices.npz stores M_real / M_imag with shape (128,64)
+- deeponet_u250_int4_qonnx.onnx has:
+  branch.fc1.weight = [64,256]
+  branch.fc2.weight = [64,64]
+  branch.fc3.weight = [64,64]
+  out_fc.weight     = [256,64]
+- model.onnx, step4, and the completed dataflow build now correspond to this latent-64 variant
 
 verification status:
 - 5 verification cases currently exist under my_build_2/verification
 - each case uses input shape (1,256)
 - compact-complex output layout is first 128 real, last 128 imag
-- the verification folder has been regenerated for the current latent-56 variant
+- the verification folder has been regenerated for the current latent-64 variant
 - 5 returned board outputs are now stored for this current variant
-- dequantized comparison figures were generated under:
-  my_build_2/figures/step6_compare_deploy_output/20260526_115853
-- batch mean metrics from that run:
-  rmse = 0.371493214369
-  relative_rmse = 0.547158712149
-  complex_rmse = 0.525370746851
-  amplitude_rmse = 0.374583101273
-  max_abs_diff = 1.122069334984
-  mean_abs_diff = 0.295491200686
+- dequantized comparison figures with PyTorch overlays were generated under:
+  my_build_2/figures/dequantized/20260526_160038
 
-build status:
-- dataflow_build_config.json points to output_u250_bitfile_2
-- deeponet_u250_int4_qonnx.onnx has been updated to latent = 56
-- model.onnx, step4, and the dataflow build now correspond to this latent-56 variant
+board vs ssfm batch mean metrics (latent-64):
+- rmse = 0.352022922039
+- relative_rmse = 0.518495074882
+- complex_rmse = 0.497835594416
+- amplitude_rmse = 0.340650480986
+- max_abs_diff = 1.035019767284
+- mean_abs_diff = 0.283299300075
+
+pytorch vs ssfm batch mean metrics on the same 5 cases:
+- pytorch_rmse = 0.114803853631
+- pytorch_relative_rmse = 0.169092583396
+- pytorch_complex_rmse = 0.162357163429
+- pytorch_amplitude_rmse = 0.118349532783
+- pytorch_max_abs_diff = 0.328993582726
+- pytorch_mean_abs_diff = 0.092667403817
+
+timing summary:
+- board mean inference time across 5 cases = 0.5728108 ms
+- pytorch mean inference time across the same 5 cases = 3.3351793332743305 ms
+- board speedup vs pytorch = about 5.82x
+
+timing notes:
+- each board timing file currently uses warmup_runs = 2 and measure_runs = 20
+- each PyTorch timing file currently uses warmup_runs = 5 and measure_runs = 30
+- board timing files are stored in my_build_2/verification/case_xxx/board_inference_timing.txt
+- per-case PyTorch timing files are stored in:
+  my_build_2/figures/dequantized/20260526_160038/case_xxx/pytorch_inference_timing.json
